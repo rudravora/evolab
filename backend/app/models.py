@@ -88,6 +88,9 @@ class Run(Base):
     brief_json: Mapped[Json | None] = mapped_column(JSON)
     activation_json: Mapped[Json | None] = mapped_column(JSON)
     plan_version: Mapped[int] = mapped_column(Integer, default=0)
+    plan_json: Mapped[Json | None] = mapped_column(JSON)          # current approved task graph
+    mode: Mapped[str | None] = mapped_column(String(1))           # A|B|C once the audit reports
+    replan_count: Mapped[int] = mapped_column(Integer, default=0)
     budget_json: Mapped[Json | None] = mapped_column(JSON)
     usage_json: Mapped[Json | None] = mapped_column(JSON)
     started_at: Mapped[str] = _ts()
@@ -148,6 +151,13 @@ class AgentTask(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), index=True)
     agent_version_id: Mapped[str | None] = mapped_column(ForeignKey("agent_versions.id"))
+    agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), index=True)   # assigned agent (null = service or gap)
+    graph_key: Mapped[str | None] = mapped_column(String(64))         # task id inside the plan graph
+    depends_on_json: Mapped[Json | None] = mapped_column(JSON)        # graph keys this task waits for
+    branch_id: Mapped[str | None] = mapped_column(String(64))
+    state_json: Mapped[Json | None] = mapped_column(JSON)             # loop history and the pending tool call
+    steps: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text)
     task_type: Mapped[str] = mapped_column(String(64))
     required_tags_json: Mapped[Json | None] = mapped_column(JSON)
     input_json: Mapped[Json | None] = mapped_column(JSON)
@@ -276,6 +286,17 @@ class Experiment(Base):
     metrics_json: Mapped[Json | None] = mapped_column(JSON)
     cost_s: Mapped[float | None] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(24), default="queued")
+    debug_cycles: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[str] = _ts()
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), index=True)
+    role: Mapped[str] = mapped_column(String(16))      # researcher|meta_controller|system
+    content: Mapped[str] = mapped_column(Text)
+    target_agent_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[str] = _ts()
 
 

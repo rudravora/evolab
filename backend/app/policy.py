@@ -35,6 +35,7 @@ PY_ESCAPES = ("os.system", "subprocess", "os.popen", "os.exec", "pty.spawn", "__
 DENY_ENV_KEYS = {"GIT_SSH_COMMAND", "PYTHONPATH", "PYTHONSTARTUP", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL"}
 DENY_ENV_PREFIXES = ("GIT_CONFIG", "LD_", "DYLD_")
 DENY_ENV_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET")
+TRUSTED_URL_PREFIXES: list[str] = []   # set at startup: this backend's signed upload-relay URLs
 PINNED = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9,._-]+\])?==[A-Za-z0-9.+!_-]+$")
 
 
@@ -113,7 +114,7 @@ def classify(job_type: str, payload: dict, timeout_s: int) -> Verdict:
     if not isinstance(payload, dict):
         return _deny("payload must be an object")
 
-    for field in ("cwd", "path", "dest"):
+    for field in ("cwd", "path", "dest", "results_path"):
         if field in payload and (problem := check_path(payload[field], field)):
             return _deny(problem)
 
@@ -144,6 +145,8 @@ def classify(job_type: str, payload: dict, timeout_s: int) -> Verdict:
             else Verdict("auto", "all packages on the allowlist")
     elif job_type == "download":
         url = payload.get("url")
+        if isinstance(url, str) and any(url.startswith(p) for p in TRUSTED_URL_PREFIXES) and "dest" in payload:
+            return Verdict("auto", "relay of a researcher upload from this backend")
         if not isinstance(url, str) or urlparse(url).scheme != "https":
             return _deny("download url must be https")
         if "dest" not in payload:

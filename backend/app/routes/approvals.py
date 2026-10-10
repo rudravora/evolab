@@ -1,11 +1,12 @@
-"""Approvals inbox (API.md section 8). M1 handles job approvals (risky_command, new_package,
-expensive_run); plan, evolution and the other types are decided here too once M2-M4 create them."""
+"""Approvals inbox (API.md section 8). Job approvals (risky_command, new_package, expensive_run)
+are applied here; plan, human_input, candidate_selection and evolution decisions go to the
+orchestrator."""
 
 from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -20,6 +21,7 @@ from ..security import current_user
 
 router = APIRouter(prefix="/approvals", tags=["approvals"], dependencies=[Depends(current_user)])
 JOB_APPROVALS = {"risky_command", "new_package", "expensive_run"}
+EDITABLE = {"plan", "evolution", "candidate_selection", "human_input"}
 
 
 class ApprovalOut(BaseModel):
@@ -37,7 +39,8 @@ class ApprovalOut(BaseModel):
 
 
 def _out(a: Approval) -> ApprovalOut:
-    return ApprovalOut(id=a.id, run_id=a.run_id, type=a.type, status=a.status, payload=a.payload_json,
+    payload = {k: v for k, v in (a.payload_json or {}).items() if k != "candidate"}   # internal ladder state stays server-side
+    return ApprovalOut(id=a.id, run_id=a.run_id, type=a.type, status=a.status, payload=payload,
                        requested_by=a.requested_by, decided_via=a.decided_via, comment=a.comment,
                        expires_at=a.expires_at, decided_at=a.decided_at, created_at=a.created_at)
 
@@ -66,12 +69,16 @@ class DecideIn(BaseModel):
     edited_payload: dict | None = None
 
 
-def apply_decision(db: Session, a: Approval, status: str, via: str, comment: str | None = None) -> None:
-    """Shared by the dashboard route, the expiry sweeper and (M5) the n8n hook."""
+def apply_decision(db: Session, a: Approval, status: str, via: str, comment: str | None = None, services=None,
+                   edited: dict | None = None) -> None:
+    """Shared by the dashboard route, the expiry sweeper and the n8n hook."""
+    if status == "edited" and a.type not in EDITABLE:
+        raise ApiError(409, "invalid_state", f"Edit is not supported for {a.type} approvals; approve or reject")
     a.status, a.decided_via, a.comment, a.decided_at = status, via, comment, now_iso()
+    a.token_hash = None                        # any outstanding n8n tokens become unusable
     emit(db, a.run_id, via, "approval.decided", {"approval_id": a.id, "status": status})
     if a.type in JOB_APPROVALS:
-        job = db.get(Job, a.payload_json.get("job_id"))
+        job = db.get(Job, (a.payload_json or {}).get("job_id"))
         if job is None or job.status != "awaiting_approval":
             return
         if status == "approved":
@@ -79,18 +86,22 @@ def apply_decision(db: Session, a: Approval, status: str, via: str, comment: str
             job_event(db, job)
         else:
             finish_job(db, job, "cancelled", stderr_tail=f"approval {status}: {comment or 'no comment'}")
+        return
+    if services is not None:
+        from ..orchestrator import on_approval_decided
+        on_approval_decided(db, services, a, status, edited)
 
 
 @router.post("/{approval_id}/decide", response_model=ApprovalOut)
-def decide(approval_id: str, body: DecideIn, db: Session = Depends(get_db)) -> ApprovalOut:
+def decide(approval_id: str, body: DecideIn, request: Request, db: Session = Depends(get_db)) -> ApprovalOut:
     a = db.get(Approval, approval_id)
     if a is None:
         raise ApiError(404, "not_found", "Approval not found")
     if a.status != "pending":
         raise ApiError(409, "invalid_state", f"Approval is already {a.status}")
-    if body.decision == "edit":
-        # Editing a job means a new job through the policy again; plan edits arrive in M2.
-        raise ApiError(409, "invalid_state", f"Edit is not supported for {a.type} approvals yet; approve or reject")
-    apply_decision(db, a, "approved" if body.decision == "approve" else "rejected", "dashboard", body.comment)
+    status = {"approve": "approved", "reject": "rejected", "edit": "edited"}[body.decision]
+    if status == "edited" and not body.edited_payload:
+        raise ApiError(422, "validation_error", "edit needs edited_payload")
+    apply_decision(db, a, status, "dashboard", body.comment, request.app.state.services, body.edited_payload)
     db.commit()
     return _out(a)
