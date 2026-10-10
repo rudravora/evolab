@@ -21,6 +21,9 @@ from pathlib import Path
 
 import requests
 
+import policy
+import runner
+
 try:
     import psutil
 except ImportError:
@@ -81,50 +84,18 @@ def load_token() -> str | None:
     return TOKEN_PATH.read_text().strip() or None
 
 
-class JailViolation(Exception):
-    pass
+JailViolation = policy.JailViolation  # re-exported for callers/tests built against this name
 
 
-def resolve_job_cwd(workspace_root: Path, cwd: str) -> Path:
-    """Reject absolute paths and '..' segments; resolve inside workspace_root.
+def run_job(job: dict, workspace_root: Path, on_log=None) -> dict:
+    """Classify and run a job under worker/policy.py and worker/runner.py.
 
-    API.md's jobs/next example shows `cwd` as a path like "runs/<project>/code"
-    with no separate project_id field in the job payload (see docs notes below
-    for the assumption this implies). The whole cwd is jailed under
-    WORKSPACE_ROOT.
+    API.md's jobs/next response carries no project_id field -- only `payload`
+    (argv/cwd/env/...), so the whole `cwd` string is jailed under
+    WORKSPACE_ROOT (see runner.py and policy.py docstrings for the same
+    assumption).
     """
-    if not cwd:
-        raise JailViolation("cwd is required")
-    if Path(cwd).is_absolute():
-        raise JailViolation(f"cwd must be relative: {cwd!r}")
-    if ".." in Path(cwd).parts:
-        raise JailViolation(f"cwd must not contain '..': {cwd!r}")
-    resolved = (workspace_root / cwd).resolve()
-    try:
-        resolved.relative_to(workspace_root.resolve())
-    except ValueError:
-        raise JailViolation(f"cwd escapes workspace root: {cwd!r}")
-    return resolved
-
-
-def run_job(job: dict, workspace_root: Path) -> dict:
-    """Stub runner: validates the jail, returns a canned success result.
-
-    The real command runner and policy modules fill this in later. For now
-    this proves the pull loop end to end and enforces the jail rule.
-    """
-    payload = job.get("payload", {})
-    cwd = payload.get("cwd")
-    if cwd is not None:
-        resolve_job_cwd(workspace_root, cwd)  # raises JailViolation on violation
-    return {
-        "status": "done",
-        "exit_code": 0,
-        "stdout_tail": "",
-        "stderr_tail": "",
-        "metrics": {},
-        "files": [],
-    }
+    return runner.run_job(job, workspace_root, on_log=on_log)
 
 
 class Worker:
@@ -325,26 +296,13 @@ class Worker:
 
         self.start_job(job_id, attempt)
 
-        seq = [0]
-
-        def make_chunk(stream: str, text: str) -> dict:
-            seq[0] += 1
-            return {"seq": seq[0], "stream": stream, "text": text}
+        def on_log(chunks: list[dict]) -> None:
+            # runner.py assigns its own sequence numbers across stdout+stderr;
+            # forward chunks to the backend as they're produced.
+            self.post_logs(job_id, attempt, chunks)
 
         try:
-            try:
-                result = run_job(job, self.workspace_root)
-                self.post_logs(job_id, attempt, [make_chunk("stdout", "job completed")])
-            except JailViolation as exc:
-                result = {
-                    "status": "failed",
-                    "exit_code": 1,
-                    "stdout_tail": "",
-                    "stderr_tail": f"policy_denied: {exc}",
-                    "metrics": {},
-                    "files": [],
-                }
-                self.post_logs(job_id, attempt, [make_chunk("stderr", str(exc))])
+            result = run_job(job, self.workspace_root, on_log=on_log)
 
             if self.stop_event.is_set() and job_id in self.running_jobs:
                 # Shutting down while this job was still considered running:
