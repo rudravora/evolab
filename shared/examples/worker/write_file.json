@@ -1,0 +1,24 @@
+{
+  "job": {
+    "job_id": "job_example_write_file_01",
+    "project_id": "example_project",
+    "attempt": 1,
+    "type": "write_file",
+    "payload": {
+      "path": "code/config.json",
+      "content": "{ \"seed\": 0 }"
+    },
+    "approved": false,
+    "timeout_s": 60,
+    "max_output_bytes": 100000
+  },
+  "result": {
+    "attempt": 1,
+    "status": "done",
+    "exit_code": 0,
+    "stdout_tail": "",
+    "stderr_tail": "",
+    "metrics": {},
+    "files": [ { "path": "code/config.json", "sha256": "1111111111111111111111111111111111111111111111111111111111111111" } ]
+  }
+}

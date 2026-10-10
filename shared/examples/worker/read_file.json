@@ -1,0 +1,23 @@
+{
+  "job": {
+    "job_id": "job_example_read_file_01",
+    "project_id": "example_project",
+    "attempt": 1,
+    "type": "read_file",
+    "payload": {
+      "path": "code/config.json"
+    },
+    "approved": false,
+    "timeout_s": 60,
+    "max_output_bytes": 100000
+  },
+  "result": {
+    "attempt": 1,
+    "status": "done",
+    "exit_code": 0,
+    "stdout_tail": "{ \"seed\": 0 }",
+    "stderr_tail": "",
+    "metrics": {},
+    "files": []
+  }
+}

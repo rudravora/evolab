@@ -1,0 +1,9 @@
+# Pinned-install package allowlist (names only; pip_install jobs must still pin
+# an exact version at job-creation time, this list just says which names are
+# auto-approved). One name per line, '#' comments allowed.
+numpy
+scipy
+scikit-learn
+torch
+pandas
+matplotlib

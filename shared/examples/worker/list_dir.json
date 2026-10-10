@@ -1,0 +1,23 @@
+{
+  "job": {
+    "job_id": "job_example_list_dir_01",
+    "project_id": "example_project",
+    "attempt": 1,
+    "type": "list_dir",
+    "payload": {
+      "path": "code"
+    },
+    "approved": false,
+    "timeout_s": 60,
+    "max_output_bytes": 100000
+  },
+  "result": {
+    "attempt": 1,
+    "status": "done",
+    "exit_code": 0,
+    "stdout_tail": "config.json\ntrain_example.py\nresults/\n",
+    "stderr_tail": "",
+    "metrics": {},
+    "files": []
+  }
+}
