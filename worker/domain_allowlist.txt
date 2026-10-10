@@ -1,0 +1,7 @@
+# Domains auto-approved for download jobs. One per line, '#' comments allowed.
+# Starting set: common dataset/package hosts. Extend as the team needs more.
+pypi.org
+files.pythonhosted.org
+github.com
+raw.githubusercontent.com
+arxiv.org
