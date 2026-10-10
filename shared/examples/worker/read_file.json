@@ -1,11 +1,13 @@
 {
   "job": {
     "job_id": "job_example_read_file_01",
+    "project_id": "example_project",
     "attempt": 1,
     "type": "read_file",
     "payload": {
-      "path": "runs/example_project/code/config.json"
+      "path": "code/config.json"
     },
+    "approved": false,
     "timeout_s": 60,
     "max_output_bytes": 100000
   },

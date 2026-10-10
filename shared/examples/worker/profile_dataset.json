@@ -1,14 +1,16 @@
 {
-  "_comment": "ARCHITECTURE.md section 5 lists this as the job type 'python_script running profile_dataset.py' — not a distinct API.md `type` value, but a python_script job with a fixed script name.",
+  "_comment": "ARCHITECTURE.md section 5 lists this as the job type 'python_script running profile_dataset.py' — not a distinct API.md `type` value, but a python_script job with a fixed script name. Note: API.md's own argv example still uses --path; experiments/tools/profile_dataset.py (built separately) actually takes --input/--out. Not reconciled here -- out of scope for this change.",
   "job": {
     "job_id": "job_example_profile_dataset_01",
+    "project_id": "example_project",
     "attempt": 1,
     "type": "python_script",
     "payload": {
-      "argv": ["python", "profile_dataset.py", "--path", "runs/example_project/data/example-dataset.csv"],
-      "cwd": "runs/example_project/code",
+      "argv": ["python", "profile_dataset.py", "--path", "data/example-dataset.csv"],
+      "cwd": "code",
       "env": {}
     },
+    "approved": false,
     "timeout_s": 300,
     "max_output_bytes": 2000000
   },

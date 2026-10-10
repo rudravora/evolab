@@ -1,12 +1,14 @@
 {
   "job": {
     "job_id": "job_example_git_01",
+    "project_id": "example_project",
     "attempt": 1,
     "type": "git",
     "payload": {
       "op": "commit",
       "args": { "message": "example: apply patch" }
     },
+    "approved": false,
     "timeout_s": 60,
     "max_output_bytes": 100000
   },

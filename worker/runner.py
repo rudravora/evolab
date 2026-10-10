@@ -1,8 +1,14 @@
 """Job runner: executes a job's argv under worker/policy.py's checks
 (ARCHITECTURE.md sections 3.2 job lifecycle and 6 safety).
 
-macOS arm64 only -- no Windows code paths. Uses POSIX process groups
-(start_new_session=True) and the `resource` module, both POSIX-only.
+macOS and Linux only -- no Windows support (worker.py exits at startup on
+Windows; see its platform guard). Uses POSIX process groups
+(start_new_session=True) and the `resource` module, both POSIX-only, so this
+module guards their import: importing runner.py on Windows must not raise at
+import time (a Windows machine might still `import runner` transitively,
+e.g. from a test collector, before worker.py's own guard has a chance to
+exit), even though none of the process-execution functions here are
+reachable or usable on Windows.
 
 Safety properties:
 - Never starts a process for a `deny` verdict, or an un-approved
@@ -33,7 +39,6 @@ Safety properties:
 import json
 import os
 import re
-import resource
 import signal
 import subprocess
 import sys
@@ -42,6 +47,11 @@ import time
 from pathlib import Path
 
 import policy
+
+try:
+    import resource
+except ImportError:
+    resource = None  # resource is POSIX-only; absent on Windows
 
 try:
     import psutil
@@ -108,6 +118,8 @@ def _set_resource_limits(
     max file size). Does NOT attempt a memory rlimit -- see module docstring.
     """
     def _apply():
+        if resource is None:  # Windows; execute() should never reach here (see worker.py's platform guard)
+            return
         try:
             resource.setrlimit(resource.RLIMIT_CPU, (cpu_s, cpu_s))
         except (ValueError, OSError):
@@ -130,6 +142,10 @@ def _set_resource_limits(
 
 
 def _kill_process_group(pgid: int, *, grace_s: float = SIGTERM_GRACE_S) -> None:
+    """POSIX-only (os.killpg, SIGKILL). Never called on Windows -- worker.py's
+    platform guard exits before any job reaches execute()."""
+    if not hasattr(os, "killpg"):
+        return
     try:
         os.killpg(pgid, signal.SIGTERM)
     except ProcessLookupError:
@@ -140,11 +156,59 @@ def _kill_process_group(pgid: int, *, grace_s: float = SIGTERM_GRACE_S) -> None:
             os.killpg(pgid, 0)  # raises ProcessLookupError once the group is gone
         except ProcessLookupError:
             return
+        except PermissionError:
+            # pgid was reaped and reused by a process we can't signal; we
+            # can no longer tell whether our job's group is still alive, so
+            # stop polling and fall through to the SIGKILL attempt below
+            # (also harmless against a pid we don't own: ProcessLookupError
+            # or PermissionError there is caught and ignored too).
+            break
         time.sleep(0.1)
     try:
         os.killpg(pgid, signal.SIGKILL)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         pass
+
+
+class CancelRegistry:
+    """Thread-safe map of job_id -> (process group id, cancel event) for jobs
+    currently executing. Lets the heartbeat loop's cancel_job_ids handling
+    (worker.py) kill a running job's process group from a different thread
+    than the one running execute() for that job: cancel() sets the event and
+    kills the group directly; execute()'s own watchdog thread for that job
+    waits on the same event purely to label the result "cancelled" instead
+    of "failed" once proc.wait() returns.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._entries: dict[str, tuple[int, threading.Event]] = {}
+
+    def register(self, job_id: str, pgid: int) -> threading.Event:
+        event = threading.Event()
+        if job_id is not None:
+            with self._lock:
+                self._entries[job_id] = (pgid, event)
+        return event
+
+    def unregister(self, job_id: str) -> None:
+        if job_id is None:
+            return
+        with self._lock:
+            self._entries.pop(job_id, None)
+
+    def cancel(self, job_id: str) -> bool:
+        """Kill the process group for job_id if it is currently running.
+        Returns True if a running job was found and killed, False otherwise
+        (already finished, or never registered)."""
+        with self._lock:
+            entry = self._entries.get(job_id)
+        if entry is None:
+            return False
+        pgid, event = entry
+        event.set()
+        _kill_process_group(pgid)
+        return True
 
 
 def _group_rss_bytes(pid: int) -> int:
@@ -253,13 +317,23 @@ def execute(
     max_output_bytes: int,
     on_log=None,
     max_rss_bytes: int = DEFAULT_MAX_RSS_BYTES,
+    cancel_registry: "CancelRegistry | None" = None,
+    job_id: str | None = None,
 ) -> dict:
     """Run argv (a real list, never a shell string) in its own process group
     under cwd/env, capturing output and enforcing timeout_s and (if psutil is
     available) max_rss_bytes.
 
-    Returns {"status", "exit_code", "stdout_tail", "stderr_tail"}. Does not
-    know about `metrics`/`files` (results JSON) -- see run_job below.
+    If cancel_registry is given, this job's process group is registered
+    under job_id for the duration of the run so a concurrent call to
+    cancel_registry.cancel(job_id) (from the heartbeat loop, handling
+    cancel_job_ids) can kill it; the registration is removed once the
+    process exits, win or lose.
+
+    Returns {"status", "exit_code", "stdout_tail", "stderr_tail"}. status is
+    "cancelled" if cancel_registry.cancel() killed it, "timed_out" if the
+    wall-clock timeout killed it, "done" on exit code 0, else "failed". Does
+    not know about `metrics`/`files` (results JSON) -- see run_job below.
     """
     on_log = on_log or (lambda chunks: None)
     seq_counter = [0]
@@ -284,6 +358,9 @@ def execute(
         }
 
     pgid = proc.pid
+    cancel_event = None
+    if cancel_registry is not None and job_id is not None:
+        cancel_event = cancel_registry.register(job_id, pgid)
 
     stdout_capture = _OutputCapture("stdout", proc.stdout, max_output_bytes, seq_counter, on_log, log_lock)
     stderr_capture = _OutputCapture("stderr", proc.stderr, max_output_bytes, seq_counter, on_log, log_lock)
@@ -292,6 +369,7 @@ def execute(
 
     timed_out = threading.Event()
     memory_exceeded = threading.Event()
+    cancelled = threading.Event()
 
     def _timeout_watchdog():
         if not proc_finished.wait(timeout_s):
@@ -313,21 +391,42 @@ def execute(
                 _kill_process_group(pgid)
                 return
 
+    def _cancel_watchdog():
+        # cancel_registry.cancel() (called from the heartbeat thread) sets
+        # cancel_event and kills the process group itself; this thread's
+        # only job is to notice that happened so the result can be labelled
+        # "cancelled" rather than "failed" once proc.wait() returns. Waits on
+        # proc_finished too so it doesn't block past the process's own exit.
+        if cancel_event is None:
+            return
+        while not proc_finished.is_set():
+            if cancel_event.wait(0.2):
+                cancelled.set()
+                return
+
     proc_finished = threading.Event()
     timeout_thread = threading.Thread(target=_timeout_watchdog, daemon=True)
     memory_thread = threading.Thread(target=_memory_watchdog, daemon=True)
+    cancel_thread = threading.Thread(target=_cancel_watchdog, daemon=True)
     timeout_thread.start()
     memory_thread.start()
+    cancel_thread.start()
 
     exit_code = proc.wait()
     proc_finished.set()
+
+    if cancel_registry is not None and job_id is not None:
+        cancel_registry.unregister(job_id)
 
     stdout_capture.join(timeout=5)
     stderr_capture.join(timeout=5)
     timeout_thread.join(timeout=1)
     memory_thread.join(timeout=1)
+    cancel_thread.join(timeout=1)
 
-    if timed_out.is_set():
+    if cancelled.is_set():
+        status = "cancelled"
+    elif timed_out.is_set():
         status = "timed_out"
     elif memory_exceeded.is_set():
         status = "failed"
@@ -339,6 +438,8 @@ def execute(
     stderr_tail = stderr_capture.tail_text()
     if memory_exceeded.is_set():
         stderr_tail = (stderr_tail + "\nkilled: exceeded memory limit (RSS)").strip()
+    if cancelled.is_set():
+        stderr_tail = (stderr_tail + "\ncancelled: job was cancelled").strip()
 
     return {
         "status": status,
@@ -359,7 +460,18 @@ def _read_results_file(path: Path) -> dict:
         return {}
 
 
-def run_job(job: dict, workspace_root: Path, on_log=None) -> dict:
+def _denied(reason: str) -> dict:
+    return {
+        "status": "failed",
+        "exit_code": None,
+        "stdout_tail": "",
+        "stderr_tail": f"policy_denied: {reason}",
+        "metrics": {},
+        "files": [],
+    }
+
+
+def run_job(job: dict, workspace_root: Path, on_log=None, cancel_registry=None) -> dict:
     """Classify the job, run it if allowed, return the result shape
     worker.py's post_result expects: status, exit_code, stdout_tail,
     stderr_tail, metrics, files.
@@ -367,26 +479,29 @@ def run_job(job: dict, workspace_root: Path, on_log=None) -> dict:
     Never starts a process for `deny`, or for `needs_approval` unless
     job.get("approved") is true (ARCHITECTURE.md 3.2/6: deny always wins,
     approval only unlocks needs_approval items).
+
+    API.md section 9 / D-042: every job carries `project_id` at the top
+    level; the jail root for this job is WORKSPACE_ROOT/<project_id>/, not
+    WORKSPACE_ROOT itself. project_id is validated before use (empty,
+    absolute, '..' or a path separator are all rejected).
+
+    `cancel_registry`, if given, is a CancelRegistry (see below) that this
+    call registers its live subprocess's pgid into for the duration of the
+    run, so a concurrent cancel request (from the heartbeat loop) can find
+    and kill it.
     """
+    try:
+        project_id = policy.validate_project_id(job.get("project_id"))
+    except policy.JailViolation as exc:
+        return _denied(str(exc))
+
+    jail_root = workspace_root / project_id
+
     verdict, reason = policy.classify(job)
     if verdict == "deny":
-        return {
-            "status": "failed",
-            "exit_code": None,
-            "stdout_tail": "",
-            "stderr_tail": f"policy_denied: {reason}",
-            "metrics": {},
-            "files": [],
-        }
+        return _denied(reason)
     if verdict == "needs_approval" and not job.get("approved"):
-        return {
-            "status": "failed",
-            "exit_code": None,
-            "stdout_tail": "",
-            "stderr_tail": f"policy_denied: needs_approval: {reason}",
-            "metrics": {},
-            "files": [],
-        }
+        return _denied(f"needs_approval: {reason}")
 
     job_type = job.get("type", "")
     payload = job.get("payload", {}) or {}
@@ -404,21 +519,15 @@ def run_job(job: dict, workspace_root: Path, on_log=None) -> dict:
 
     cwd_rel = payload.get("cwd") or job.get("cwd") or "."
     try:
-        cwd = policy.resolve_in_jail(cwd_rel, workspace_root)
+        cwd = policy.resolve_in_jail(cwd_rel, jail_root)
     except policy.JailViolation as exc:
-        return {
-            "status": "failed",
-            "exit_code": None,
-            "stdout_tail": "",
-            "stderr_tail": f"policy_denied: {exc}",
-            "metrics": {},
-            "files": [],
-        }
+        return _denied(str(exc))
     cwd.mkdir(parents=True, exist_ok=True)
-    (workspace_root / ".tmp").mkdir(parents=True, exist_ok=True)
+    (jail_root / ".tmp").mkdir(parents=True, exist_ok=True)
 
-    env, rejected_env_keys = build_clean_env(workspace_root, payload.get("env"))
+    env, rejected_env_keys = build_clean_env(jail_root, payload.get("env"))
 
+    job_id = job.get("job_id")
     result = execute(
         argv,
         cwd=cwd,
@@ -426,10 +535,11 @@ def run_job(job: dict, workspace_root: Path, on_log=None) -> dict:
         timeout_s=job.get("timeout_s", 900),
         max_output_bytes=job.get("max_output_bytes", 5_000_000),
         on_log=on_log,
+        cancel_registry=cancel_registry,
+        job_id=job_id,
     )
 
     if rejected_env_keys and on_log:
-        seq = [0]
         on_log(
             [
                 {
@@ -444,7 +554,7 @@ def run_job(job: dict, workspace_root: Path, on_log=None) -> dict:
     metrics = {}
     if results_path:
         try:
-            resolved_results_path = policy.resolve_in_jail(results_path, workspace_root)
+            resolved_results_path = policy.resolve_in_jail(results_path, jail_root)
             metrics = _read_results_file(resolved_results_path)
         except policy.JailViolation:
             pass  # results_path outside the jail: no metrics, job output stands as-is

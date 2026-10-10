@@ -36,6 +36,24 @@ BACKOFF_INITIAL_S = 1.0
 BACKOFF_MAX_S = 60.0
 LOG_FLUSH_INTERVAL_S = 1.0
 
+RETRYABLE_STATUS_CODES = {429, 500, 501, 502, 503, 504}
+
+
+class AuthError(Exception):
+    """Raised when the backend returns 401 or 403: the worker token is
+    invalid or revoked. D-042: a rejected token makes the worker exit and
+    re-pair -- this is never retried with backoff."""
+
+
+class JobHTTPError(Exception):
+    """Raised for a non-retryable 4xx (not 401/403) on a job-specific call
+    (start/logs/result). The caller reports that one job as failed instead
+    of retrying forever or crashing the whole worker."""
+
+    def __init__(self, status_code: int, message: str):
+        super().__init__(message)
+        self.status_code = status_code
+
 
 def load_dotenv(path: Path) -> None:
     """Minimal .env loader: KEY=VALUE per line, '#' comments, no quoting rules."""
@@ -87,15 +105,15 @@ def load_token() -> str | None:
 JailViolation = policy.JailViolation  # re-exported for callers/tests built against this name
 
 
-def run_job(job: dict, workspace_root: Path, on_log=None) -> dict:
+def run_job(job: dict, workspace_root: Path, on_log=None, cancel_registry=None) -> dict:
     """Classify and run a job under worker/policy.py and worker/runner.py.
 
-    API.md's jobs/next response carries no project_id field -- only `payload`
-    (argv/cwd/env/...), so the whole `cwd` string is jailed under
-    WORKSPACE_ROOT (see runner.py and policy.py docstrings for the same
-    assumption).
+    API.md section 9 / D-042: `job["project_id"]` selects the jail root
+    (WORKSPACE_ROOT/<project_id>/); runner.run_job validates it and resolves
+    `cwd` and `results_path` relative to that root, not WORKSPACE_ROOT
+    directly.
     """
-    return runner.run_job(job, workspace_root, on_log=on_log)
+    return runner.run_job(job, workspace_root, on_log=on_log, cancel_registry=cancel_registry)
 
 
 class Worker:
@@ -113,6 +131,8 @@ class Worker:
         self.running_jobs_lock = threading.Lock()
         self.active_count = 0
         self.active_count_lock = threading.Lock()
+        self.cancel_registry = runner.CancelRegistry()
+        self.auth_error: AuthError | None = None
 
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self.token}"}
@@ -120,14 +140,42 @@ class Worker:
     def _url(self, path: str) -> str:
         return f"{self.backend_url}{API_PREFIX}{path}"
 
-    def _backoff_request(self, fn, *, what: str):
-        """Call fn() with exponential backoff on connection errors. Never raises;
-        returns None if stop_event is set while backing off."""
+    def _backoff_request(self, fn, *, what: str, job_call: bool = False):
+        """Call fn() (which must call resp.raise_for_status() itself) with
+        exponential backoff, but only for errors that backoff can actually
+        fix: connection errors, timeouts, 429, and 5xx.
+
+        401/403 (an invalid or revoked token) are never retried -- raises
+        AuthError so the caller can exit with a clear message and a request
+        for re-pairing (D-042).
+
+        Any other 4xx is also never retried (retrying a malformed or
+        rejected request forever just spins). If job_call is True, raises
+        JobHTTPError so the caller reports that one job as failed instead of
+        crashing the worker; if False (register/heartbeat/claim -- not tied
+        to one job), the HTTPError itself propagates.
+
+        Returns None if stop_event is set while backing off, otherwise
+        either returns fn()'s result or raises.
+        """
         delay = BACKOFF_INITIAL_S
         while not self.stop_event.is_set():
             try:
                 return fn()
-            except requests.RequestException as exc:
+            except requests.HTTPError as exc:
+                status = exc.response.status_code if exc.response is not None else None
+                if status in (401, 403):
+                    raise AuthError(f"{what}: backend returned {status} (worker token invalid or revoked)") from exc
+                if status in RETRYABLE_STATUS_CODES:
+                    print(f"{what} failed: HTTP {status}; retrying in {delay:.1f}s")
+                    self.stop_event.wait(delay + random.uniform(0, delay * 0.1))
+                    delay = min(delay * 2, BACKOFF_MAX_S)
+                    continue
+                message = f"{what}: backend returned {status}"
+                if job_call:
+                    raise JobHTTPError(status, message) from exc
+                raise
+            except (requests.ConnectionError, requests.Timeout) as exc:
                 print(f"{what} failed: {exc}; retrying in {delay:.1f}s")
                 self.stop_event.wait(delay + random.uniform(0, delay * 0.1))
                 delay = min(delay * 2, BACKOFF_MAX_S)
@@ -173,7 +221,11 @@ class Worker:
             resp.raise_for_status()
             return resp.json()
 
-        data = self._backoff_request(do_register, what="register")
+        try:
+            data = self._backoff_request(do_register, what="register")
+        except AuthError as exc:
+            print(f"error: {exc}. Get a new pairing code and re-run.", file=sys.stderr)
+            sys.exit(1)
         if data is None:
             return  # stop_event was set during backoff
         self.token = data["worker_token"]  # never printed or logged
@@ -216,16 +268,27 @@ class Worker:
 
     def heartbeat_loop(self) -> None:
         while not self.stop_event.is_set():
-            data = self.heartbeat_once()
+            try:
+                data = self.heartbeat_once()
+            except AuthError as exc:
+                self.auth_error = exc
+                self.stop_event.set()
+                return
             if data:
                 if data.get("stop"):
                     print("backend requested stop")
                     self.stop_event.set()
                     return
                 for job_id in data.get("cancel_job_ids", []):
-                    with self.running_jobs_lock:
-                        self.running_jobs.pop(job_id, None)
-                    print(f"job_id={job_id} marked for cancellation by backend")
+                    # cancel() kills the process group directly; _run_one_job
+                    # (running on its own thread) still owns posting the
+                    # "cancelled" result once execute() returns, and still
+                    # removes the job from running_jobs itself -- this call
+                    # does not touch running_jobs, so a job that already
+                    # finished between the backend's request and this call
+                    # is simply a no-op (cancel() returns False).
+                    killed = self.cancel_registry.cancel(job_id)
+                    print(f"job_id={job_id} cancel requested by backend (killed={killed})")
             self.stop_event.wait(self.heartbeat_interval_s)
 
     def claim_job(self) -> dict | None:
@@ -255,7 +318,7 @@ class Worker:
             )
             resp.raise_for_status()
 
-        self._backoff_request(do_start, what="start")
+        self._backoff_request(do_start, what="start", job_call=True)
 
     def post_logs(self, job_id: str, attempt: int, chunks: list[dict]) -> None:
         if not chunks:
@@ -270,7 +333,7 @@ class Worker:
             )
             resp.raise_for_status()
 
-        self._backoff_request(do_logs, what="logs")
+        self._backoff_request(do_logs, what="logs", job_call=True)
 
     def post_result(self, job_id: str, attempt: int, result: dict) -> None:
         body = dict(result)
@@ -285,7 +348,7 @@ class Worker:
             )
             resp.raise_for_status()
 
-        self._backoff_request(do_result, what="result")
+        self._backoff_request(do_result, what="result", job_call=True)
 
     def _run_one_job(self, job: dict) -> None:
         job_id = job["job_id"]
@@ -294,29 +357,55 @@ class Worker:
         with self.running_jobs_lock:
             self.running_jobs[job_id] = {"attempt": attempt}
 
-        self.start_job(job_id, attempt)
-
         def on_log(chunks: list[dict]) -> None:
             # runner.py assigns its own sequence numbers across stdout+stderr;
             # forward chunks to the backend as they're produced.
             self.post_logs(job_id, attempt, chunks)
 
         try:
-            result = run_job(job, self.workspace_root, on_log=on_log)
+            try:
+                self.start_job(job_id, attempt)
+                result = run_job(job, self.workspace_root, on_log=on_log, cancel_registry=self.cancel_registry)
 
-            if self.stop_event.is_set() and job_id in self.running_jobs:
-                # Shutting down while this job was still considered running:
-                # report cancelled instead of whatever run_job returned.
-                result = {
-                    "status": "cancelled",
-                    "exit_code": None,
-                    "stdout_tail": "",
-                    "stderr_tail": "",
-                    "metrics": {},
-                    "files": [],
-                }
+                if self.stop_event.is_set() and job_id in self.running_jobs:
+                    # Shutting down while this job was still considered running:
+                    # report cancelled instead of whatever run_job returned.
+                    result = {
+                        "status": "cancelled",
+                        "exit_code": None,
+                        "stdout_tail": "",
+                        "stderr_tail": "",
+                        "metrics": {},
+                        "files": [],
+                    }
 
-            self.post_result(job_id, attempt, result)
+                self.post_result(job_id, attempt, result)
+            except JobHTTPError as exc:
+                # A non-retryable 4xx (other than 401/403) on a job-specific
+                # call: this one job failed, the worker keeps running. Best
+                # effort to still tell the backend (may itself fail the same
+                # way, in which case there is nothing more to do).
+                print(f"job_id={job_id}: {exc}")
+                try:
+                    self.post_result(
+                        job_id,
+                        attempt,
+                        {
+                            "status": "failed",
+                            "exit_code": None,
+                            "stdout_tail": "",
+                            "stderr_tail": str(exc),
+                            "metrics": {},
+                            "files": [],
+                        },
+                    )
+                except (JobHTTPError, AuthError):
+                    pass
+        except AuthError as exc:
+            # The token is invalid or revoked: stop the whole worker (D-042)
+            # and let main() report it after the poll loop exits.
+            self.auth_error = exc
+            self.stop_event.set()
         finally:
             with self.running_jobs_lock:
                 self.running_jobs.pop(job_id, None)
@@ -332,7 +421,12 @@ class Worker:
                 self.stop_event.wait(self.poll_interval_s)
                 continue
 
-            job = self.claim_job()
+            try:
+                job = self.claim_job()
+            except AuthError as exc:
+                self.auth_error = exc
+                self.stop_event.set()
+                break
             if job is None:
                 self.stop_event.wait(self.poll_interval_s)
                 continue
@@ -375,7 +469,18 @@ class Worker:
                 self.running_jobs.pop(job_id, None)
 
 
+def check_platform() -> None:
+    """ARCHITECTURE.md section 6 / task spec: macOS and Linux only. Exit
+    immediately and clearly on Windows rather than failing deep inside a job
+    run on a POSIX-only call (os.killpg, resource limits, ...)."""
+    if sys.platform.startswith("win"):
+        print("Worker supports macOS and Linux only. On Windows use WSL.", file=sys.stderr)
+        sys.exit(1)
+
+
 def main() -> None:
+    check_platform()
+
     config = load_config()
     worker = Worker(config)
     worker.register()
@@ -390,6 +495,10 @@ def main() -> None:
 
     worker.poll_loop()
     worker.report_cancelled_jobs()
+
+    if worker.auth_error is not None:
+        print(f"error: {worker.auth_error}. Get a new pairing code and re-run.", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

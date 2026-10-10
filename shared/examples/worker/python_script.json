@@ -1,13 +1,15 @@
 {
   "job": {
     "job_id": "job_example_python_script_01",
+    "project_id": "example_project",
     "attempt": 1,
     "type": "python_script",
     "payload": {
       "argv": ["python", "train_example.py", "--seed", "0"],
-      "cwd": "runs/example_project/code",
+      "cwd": "code",
       "env": { "OMP_NUM_THREADS": "4" }
     },
+    "approved": false,
     "timeout_s": 900,
     "max_output_bytes": 5000000
   },

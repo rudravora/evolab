@@ -76,6 +76,27 @@ def resolve_in_jail(path: str | os.PathLike, root: str | os.PathLike) -> Path:
     return resolved
 
 
+def validate_project_id(project_id: str | None) -> str:
+    """API.md section 9 (D-042): every job's jail root is
+    WORKSPACE_ROOT/<project_id>/. project_id comes from the backend over the
+    network and must be treated as untrusted input before it's used to build
+    a filesystem path -- reject anything empty, absolute, containing '..',
+    or containing a path separator (which would let a crafted project_id
+    escape WORKSPACE_ROOT or address an unintended subdirectory of it).
+
+    Returns project_id unchanged if valid; raises JailViolation otherwise.
+    """
+    if not project_id:
+        raise JailViolation("project_id is missing or empty")
+    if Path(project_id).is_absolute():
+        raise JailViolation(f"project_id must not be absolute: {project_id!r}")
+    if ".." in Path(project_id).parts:
+        raise JailViolation(f"project_id must not contain '..': {project_id!r}")
+    if "/" in project_id or "\\" in project_id:
+        raise JailViolation(f"project_id must not contain a path separator: {project_id!r}")
+    return project_id
+
+
 def _load_list_file(path: Path) -> set[str]:
     if not path.exists():
         return set()

@@ -21,9 +21,11 @@ CALLS_LOCK = threading.Lock()
 TEST_TOKEN = "test-worker-token-should-never-be-logged"
 JOB = {
     "job_id": "job_test_1",
+    "project_id": "proj1",
     "attempt": 1,
     "type": "shell",
-    "payload": {"argv": ["cat", "greeting.txt"], "cwd": "proj1/code", "env": {}},  # "cat" is auto-allowed by policy.py
+    "payload": {"argv": ["cat", "greeting.txt"], "cwd": "code", "env": {}},  # "cat" is auto-allowed by policy.py
+    "approved": False,
     "timeout_s": 60,
     "max_output_bytes": 100000,
 }

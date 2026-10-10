@@ -89,6 +89,12 @@ class FakeWorker:
                     print("backend requested stop")
                     self.stop_event.set()
                     return
+                for cancel_job_id in data.get("cancel_job_ids", []):
+                    # This fake worker runs jobs synchronously to completion
+                    # (see poll_loop/run_job) rather than tracking them as
+                    # running, so there is no in-flight job to actually
+                    # kill here -- just acknowledge the request for realism.
+                    print(f"backend requested cancel for job_id={cancel_job_id} (no-op: fake worker has no long-running jobs)")
             except requests.RequestException as exc:
                 print(f"heartbeat failed: {exc}")
             self.stop_event.wait(self.heartbeat_interval_s)
@@ -146,12 +152,13 @@ class FakeWorker:
 
     def run_job(self, job: dict) -> None:
         job_id = job["job_id"]
+        project_id = job.get("project_id")
         attempt = job["attempt"]
         job_type = job["type"]
         self.jobs_claimed += 1
         force_fail = bool(self.fail_every) and self.jobs_claimed % self.fail_every == 0
 
-        print(f"claimed job_id={job_id} type={job_type} attempt={attempt}")
+        print(f"claimed job_id={job_id} project_id={project_id} type={job_type} attempt={attempt}")
         self.start_job(job_id, attempt)
         self.post_logs(job_id, attempt)
         self.post_result(job_id, attempt, job_type, force_fail)

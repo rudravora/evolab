@@ -1,11 +1,13 @@
 {
   "job": {
     "job_id": "job_example_list_dir_01",
+    "project_id": "example_project",
     "attempt": 1,
     "type": "list_dir",
     "payload": {
-      "path": "runs/example_project/code"
+      "path": "code"
     },
+    "approved": false,
     "timeout_s": 60,
     "max_output_bytes": 100000
   },
