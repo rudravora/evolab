@@ -84,3 +84,77 @@ A full example is in `shared/examples/worker/profile_dataset_result.json`.
 - Leakage detection only catches exact matches and near-perfect (|r| >=
   0.999) linear correlation with the target. Non-linear leakage, or leakage
   spread across several features jointly, is not detected.
+
+## repo_smoke.py
+
+Audits an unknown repository and writes `smoke.json`. Runs as a worker
+`python_script` job (ARCHITECTURE.md section 5, API.md section 9) — the
+Repo Auditor agent creates this job during the codebase path (WORKFLOW.md
+section 3.2) to decide a reproduction mode and flag issues before anything
+from the repo is trusted.
+
+```bash
+python repo_smoke.py --repo /path/to/repo --out smoke.json
+python repo_smoke.py --repo /path/to/repo --out smoke.json --install --timeout-s 300
+```
+
+| Flag | Required | Default | Meaning |
+|---|---|---|---|
+| `--repo` | yes | — | path to the repository root |
+| `--out` | yes | — | path to write the smoke JSON |
+| `--install` | no | off | also create a venv, install declared dependencies, import the top-level package, and run detected tests. Only meant to be used when the backend has marked this job `approved` (ARCHITECTURE.md section 6: a user-supplied repo's first execution is always `risk='high'`) — this script itself does not check that flag, the worker/policy layer does |
+| `--timeout-s` | no | 300 | timeout for the install step and the test run (each, separately) |
+
+Exits `0` on success and prints one summary line to stdout. Exits nonzero
+with one line on stderr on failure (missing or non-directory `--repo` path).
+
+**Security:** default (static) mode never executes anything from the repo —
+no `eval()`/`exec()`, no running `setup.py`, no importing the repo's own
+code. Python files are only parsed with the `ast` module (parsing is not
+execution) to list top-level imports. `--install` mode confines everything
+to a venv created inside the repo's own directory, with a clean, minimal
+subprocess environment (no inherited secrets) and timeouts on both the
+install and test-run steps.
+
+### Output schema (`smoke.json`)
+
+```
+mode: "static" | "install"
+project_type: "python" | "unknown"
+python_constraint: str | null    # from pyproject.toml's requires-python, or setup.cfg/setup.py's python_requires
+dependency_files: [str, ...]     # relative paths: requirements*.txt, pyproject.toml, setup.py/cfg, environment.yml
+unpinned: [str, ...]             # declared dependency specs with no version pin
+missing_declared_deps: [str, ...] # top-level imports (via ast) not covered by any declared dependency
+entry_points: [str, ...]         # main.py, __main__.py, app.py, cli.py
+tests_found: [str, ...]          # test_*.py, *_test.py, a tests/ directory
+warnings: [str, ...]             # missing README/license/tests, a .py file that failed to parse, etc.
+
+# install mode only (absent in static mode):
+install_ok: bool
+import_ok: bool
+tests_passed: int
+tests_failed: int
+errors: [str, ...]               # short one-line error strings, not full tracebacks
+elapsed_s: float
+```
+
+A full example (static mode) is in
+`shared/examples/worker/repo_smoke_result.json`.
+
+### Known limitations
+
+- `missing_declared_deps` and `unpinned` are heuristics over best-effort
+  text scraping of `requirements*.txt`, `pyproject.toml` and
+  `setup.py`/`setup.cfg` — not a real TOML/AST parser for the dependency
+  files themselves (only the repo's own `.py` files get real `ast` parsing).
+  An unusual or very dynamic `setup.py` (building its dependency list at
+  runtime) will not be understood.
+- `--install` mode installs `pytest` into the venv before running tests,
+  since most repos don't declare it as a runtime dependency; a repo using a
+  different test runner (unittest via a custom script, nose, tox) will show
+  `tests_found` non-empty but `tests_passed`/`tests_failed` both `0` with an
+  error noted, not a crash.
+- Static mode's `entry_points`/`tests_found` detection is filename-pattern
+  based, not a real build-system query — a repo with an unusual layout
+  (tests outside a `tests/` dir and not matching `test_*.py`) will be
+  under-reported, not mis-reported.

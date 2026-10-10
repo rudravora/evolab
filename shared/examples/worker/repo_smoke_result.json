@@ -1,0 +1,42 @@
+{
+  "_comment": "Example /worker/jobs/{job_id}/result payload for a repo smoke-test job (API.md section 9: a python_script or shell job running experiments/tools/repo_smoke.py). Per API.md: 'Its result metrics must carry {import_ok, tests_passed, tests_failed}.' This example is static mode (no --install), so metrics only carries what API.md requires, with null for the two install-only fields; files carries the full smoke.json. Repo values here are entirely synthetic placeholders.",
+  "attempt": 1,
+  "status": "done",
+  "exit_code": 0,
+  "stdout_tail": "audited example_repo (static mode): 1 dep file(s), 0 unpinned, 1 missing declared dep(s), 0 warning(s) -> smoke.json\n",
+  "stderr_tail": "",
+  "metrics": {
+    "import_ok": null,
+    "tests_passed": null,
+    "tests_failed": null,
+    "mode": "static",
+    "n_dependency_files": 1,
+    "n_unpinned": 0,
+    "n_missing_declared_deps": 1,
+    "n_warnings": 0
+  },
+  "files": [
+    {
+      "path": "results/smoke.json",
+      "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+    }
+  ],
+  "smoke": {
+    "mode": "static",
+    "project_type": "python",
+    "python_constraint": null,
+    "dependency_files": [
+      "requirements.txt"
+    ],
+    "unpinned": [],
+    "missing_declared_deps": [
+      "yaml"
+    ],
+    "entry_points": [],
+    "tests_found": [
+      "tests/",
+      "tests/test_example.py"
+    ],
+    "warnings": []
+  }
+}
