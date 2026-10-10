@@ -8,6 +8,9 @@ workspace/
 worker/.worker_token
 *.db
 .claude/settings.local.json
+.next/
+frontend/.next/
+out/
 
 # Cached baseline results must be committed — do not ignore.
 !experiments/results/baseline/
