@@ -1,6 +1,6 @@
 # ARCHITECTURE
 
-Version 0.4. Companion docs: [API.md](API.md), [AGENTS.md](AGENTS.md), [PRD.md](PRD.md), [WORKFLOW.md](WORKFLOW.md) (step-by-step flow with owners).
+Version 0.5. Companion docs: [API.md](API.md), [AGENTS.md](AGENTS.md), [PRD.md](PRD.md), [WORKFLOW.md](WORKFLOW.md) (step-by-step flow with owners).
 
 ## 1. Principles
 
@@ -57,7 +57,7 @@ Python FastAPI. Async. Runs the orchestrator and agent loops as background async
 Single Python file (`worker/worker.py`) with minimal dependencies (`requests`, optional `psutil`). Registers, heartbeats, claims jobs, runs them as subprocesses under the local policy, streams logs, uploads artifacts.
 
 ### 2.4 Integrations
-- **LLM providers** via `llm.call(tier, messages, tools)` wrapper; tiers `strong` (GPT-5.6 Luna), `code` (DeepSeek V4 Pro), `fast` (GPT-5 Mini) mapped to real models by env vars (D-041). All three are served by one gateway (`POST {LLM_BASE_URL}`, OpenAI Chat Completions JSON with a `model` field, `Authorization: Bearer <LLM_API_KEY>`, `"stream": false`, text only). The output-token cap is `max_completion_tokens` for the GPT models and `max_tokens` for DeepSeek (`backend/agents/models.json`). **Each request body is capped at 48 KB**, far below the models' context windows: the wrapper measures the serialized body and trims context (oldest tool results first, then memory hits) before sending, and large artifacts (paper text, logs, transcripts) are summarised or truncated rather than passed whole.
+- **LLM providers** via `llm.call(tier, messages, tools)` wrapper; tiers `strong` (GPT-5.6 Luna), `code` (DeepSeek V4 Pro), `fast` (GPT-5 Mini) mapped to real models by env vars (D-041). All three are served by one gateway (`POST {LLM_BASE_URL}`, OpenAI Chat Completions JSON with a `model` field, `Authorization: Bearer <LLM_API_KEY>`, `"stream": false`, text only). The output-token cap is `max_completion_tokens` for the GPT models and `max_tokens` for DeepSeek (`backend/agents/models.json`). **Output is capped at 4000 tokens per call** (the gateway answers HTTP 400 above that; found live, D-049), and the GPT tiers spend part of it on hidden reasoning. **Each request body is capped at 48 KB**, far below the models' context windows: the wrapper measures the serialized body and trims context (oldest tool results first, then memory hits) before sending, and large artifacts (paper text, logs, transcripts) are summarised or truncated rather than passed whole.
 - **Supermemory** behind the Librarian for memory retrieval and context (D-038). Backend only; the key never reaches the worker or frontend.
 - **LangSmith** for tracing every agent task and recording council scores as feedback (D-039).
 - **n8n** receives outbound webhooks and calls the inbound decision hook.
@@ -69,7 +69,7 @@ Single Python file (`worker/worker.py`) with minimal dependencies (`requests`, o
 
 1. `POST /projects` accepts any combination of inputs (at least one): `paper`, `question`, `repo`, `dataset`, `note`. Datasets arrive as a URL, a browser upload or a `worker_path`. No size cap for now (D-034, Q-18).
 2. Inputs are stored as untrusted data. URLs are queued for background fetch, never fetched in the request.
-3. **Facts detection** (deterministic service): classify each input; fetch metadata (paper title and arXiv id, README text, dataset size and format); look for links (README cites the paper, paper names the dataset, question names the paper). Ambiguous items only go to the Meta-Controller's fast model.
+3. **Facts detection** (deterministic service, `app/intake.py`, run as a background `intake` task; outbound fetches go through `app/web.py`, which blocks private and metadata addresses, re-checks every redirect and caps sizes): classify each input; fetch metadata (paper title and arXiv id, README text, dataset size and format); look for links (README cites the paper, paper names the dataset, question names the paper). Ambiguous items only go to the Meta-Controller's fast model.
 4. Write the **Research Brief** to `runs.brief_json`: `entry_types[]`, `goal`, `inputs[]`, `facts[]`, `domain` tag, `reference_targets[]` ranked paper claim > repo-reported numbers > published baselines > internal baselines. Emit `intake.brief`.
 
 ### 3.0b Activation and planning
@@ -104,6 +104,8 @@ queued ─▶ running ─▶ waiting_for_job ─▶ running ─▶ done
               ├──▶ waiting_for_approval ───┘
               └──▶ failed / cancelled
 ```
+Implementation (M2): `backend/app/agent_loop.py`. The gateway ignores native tool calling, so each reply is one JSON object `{"tool", "args"}` (`app/toolproto.py`); malformed replies get up to 2 protocol repairs, bad args a correction message, a schema-invalid `finish` one repair. Task statuses add `blocked` (dependencies not done, or a capability gap) and `skipped` (budget or a rejected evolution). The orchestrator (`app/orchestrator.py`) walks the graph in plain code each second; agent loops run in a thread pool; a rate-limited task goes back to `queued` with a short pause. Executor tasks (`run_baseline`, `run_branches`) are plain code (`app/executor.py`).
+
 Loop pseudocode:
 ```
 load task, agent_version, context (inputs, memory hits)
@@ -150,7 +152,7 @@ Status: `pending`, `approved`, `rejected`, `edited`, `expired`. Approvals create
 ### 3.8 Memory
 - **Write:** only verified lessons (the fix was re-run and passed). Dedupe by `signature`; increment `success_count` or `fail_count`.
 - **Store:** `memory_entries` is the audit record (verified flag, counts, labels); every entry is mirrored to Supermemory (container tags `evolab-global` and `evolab-proj-<project_id>`) and keeps its `supermemory_id` (D-038).
-- **Read:** before an agent starts a task the Librarian returns up to 3 entries: exact signature in `memory_entries`, then Supermemory search filtered by `kind`; ranked by `relevance * success_rate * recency`. If Supermemory is down, signature match only.
+- **Read:** before an agent starts a task the Librarian returns up to 3 entries: exact signature in `memory_entries`, then Supermemory search filtered by `kind`; ranked by `relevance * success_rate * recency`. If Supermemory is not configured or down, a local keyword match over the table (D-052).
 - **Feedback:** after the task, record whether retrieved entries helped.
 - **Labels:** `source` is `seeded` or `learned`. UI shows the label.
 
@@ -190,7 +192,7 @@ projects(id, owner_id, name, goal, workspace_path, created_at)
 inputs(id, project_id, kind, ref, source, meta_json, created_at)
         -- kind: paper|question|repo|dataset|note ; source: url|upload|worker_path|text
 runs(id, project_id, goal, status, entry_types_json, brief_json, activation_json, plan_version,
-     budget_json, usage_json, started_at, ended_at)
+     plan_json, mode, replan_count, budget_json, usage_json, started_at, ended_at)
 plan_revisions(id, run_id, version, trigger, kind, diff_json, reason, approval_id, created_at)
         -- kind: initial|minor|major
 
@@ -200,7 +202,8 @@ agents(id, name, role, kind, status, origin, current_version_id, parent_ids_json
         -- origin: seed|template:<name>|specialised:<agent_id>|fresh|restored
 agent_versions(id, agent_id, version, system_prompt, tools_json, capability_tags_json, model, output_schema,
                max_steps, reason, parent_version_id, probation_json, created_at)
-agent_tasks(id, run_id, agent_version_id, task_type, required_tags_json, input_json, output_json, signals_json, status,
+agent_tasks(id, run_id, agent_version_id, agent_id, graph_key, depends_on_json, branch_id, state_json, steps, error,
+            task_type, required_tags_json, input_json, output_json, signals_json, status,
             tokens_in, tokens_out, wall_s, cost_norm, outcome_det, council_q, council_judges,
             council_disagreement, council_split, outcome_score, feedback, reward,
             failure_origin_agent_id, langsmith_trace_id, created_at, ended_at)
@@ -218,7 +221,8 @@ job_logs(id, job_id, attempt, seq, stream, chunk, ts)
 
 branches(id, run_id, parent_branch_id, hypothesis, kind, spec_json, status, priority_score, decision,
          decision_reason, created_at)
-experiments(id, branch_id, job_id, seed, config_json, commit_sha, metrics_json, cost_s, status, created_at)
+experiments(id, branch_id, job_id, seed, config_json, commit_sha, metrics_json, cost_s, status, debug_cycles, created_at)
+chat_messages(id, run_id, role, content, target_agent_id, created_at)        -- role: researcher|meta_controller|system
 
 ledger_entries(id, run_id, task_id, category, description, diff_ref, before_json, after_json, created_at)
         -- category: compute_adaptation|dependency_fix|bug_fix|hyperparameter_change|fidelity_deviation
@@ -303,8 +307,10 @@ The Executor scales epochs, grid sizes, seeds and dataset subsets to fit. Budget
 | Dev | Backend `localhost:8000`, frontend `localhost:5173`, worker pointed at localhost. Everything works with no internet except the LLM. |
 | Demo | Backend and frontend on **Voroa** from the GitHub repo (web services plus managed Postgres); worker on the presenter's laptop pointed at the Voroa URL. Local-only mode kept as fallback. Large dataset uploads are relayed to the worker, not kept on the backend (Q-18). |
 
+Backend deploy artifacts (M5): `backend/Dockerfile` (build from the repo root; it needs `shared/` and `experiments/`), `backend/start.sh` (migrate, seed agents, `uvicorn` on `$PORT` behind the proxy). `DATABASE_URL` accepts `postgres://` and `postgresql://` (psycopg 3). One process: the orchestrator and the sweeper run inside the web process, so run **one** instance (VERIFY Voroa's scaling settings, Q-04).
+
 Environment variables (all in `.env.example`, never committed with values):
-`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL_STRONG`, `LLM_MODEL_CODE`, `LLM_MODEL_FAST`, `SUPERMEMORY_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`, `FEATURE_COUNCIL`, `DATABASE_URL`, `APP_SECRET`, `ALLOWED_ORIGINS`, `N8N_WEBHOOK_URL`, `N8N_SIGNING_SECRET`, `PUBLIC_BASE_URL`.
+`ARTIFACTS_DIR`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL_STRONG`, `LLM_MODEL_CODE`, `LLM_MODEL_FAST`, `SUPERMEMORY_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`, `FEATURE_COUNCIL`, `DATABASE_URL`, `APP_SECRET`, `ALLOWED_ORIGINS`, `N8N_WEBHOOK_URL`, `N8N_SIGNING_SECRET`, `PUBLIC_BASE_URL`.
 
 ## 9. Observability
 

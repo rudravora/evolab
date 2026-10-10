@@ -18,8 +18,13 @@ class Base(DeclarativeBase):
 
 
 def make_engine(url: str) -> Engine:
-    connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-    engine = create_engine(url, connect_args=connect_args)
+    if url.startswith("postgres://"):            # common hosted-Postgres spelling
+        url = "postgresql+psycopg://" + url.removeprefix("postgres://")
+    elif url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url.removeprefix("postgresql://")
+    # SQLite: agent loops run in threads, so wait for locks instead of failing at once.
+    connect_args = {"check_same_thread": False, "timeout": 30} if url.startswith("sqlite") else {}
+    engine = create_engine(url, connect_args=connect_args, pool_pre_ping=not url.startswith("sqlite"))
     if url.startswith("sqlite"):
         @event.listens_for(engine, "connect")
         def _sqlite_pragmas(dbapi_conn, _record):

@@ -1,6 +1,6 @@
 # API
 
-Version 0.5. Base path: `/api/v1`. JSON everywhere unless noted. This file is the **contract between frontend, backend and worker**; change it by PR and tell the others (see COORDINATION.md). A machine-readable `shared/openapi.yaml` should be generated from the backend and committed.
+Version 0.6. Base path: `/api/v1`. JSON everywhere unless noted. This file is the **contract between frontend, backend and worker**; change it by PR and tell the others (see COORDINATION.md). A machine-readable `shared/openapi.yaml` should be generated from the backend and committed.
 
 ## 1. Conventions
 
@@ -85,7 +85,12 @@ Create a project and start its first run in one call (intake). Any combination o
 Lists and details, including latest run summary.
 
 ### POST `/projects/{project_id}/inputs`
-Add an input mid-run. Multipart for files (no size cap for now, D-034; type allowlist: `.pdf .csv .tsv .json .parquet .txt .md .zip` `VERIFY`). Returns the `input`. Adding an input is a re-planning trigger: facts are re-detected and the Meta-Controller may revise the plan.
+Add an input mid-run. Multipart form: `kind` plus either a `file` (paper `.pdf`, or a dataset in `.csv .tsv .json .parquet .txt .md .zip`; no size cap for now, D-034) or `ref` + `source` (`url`, `text`, `worker_path`, same rules as `POST /projects`). Returns `{ "id", "kind", "source", "ref", "size_bytes" }`. Adding an input is a re-planning trigger (`input_added`).
+
+Uploaded datasets are relayed to the worker straight away (D-050): a `download` job with `approved: true`, pointing at `GET /api/v1/uploads/{input_id}?exp=&sig=` (HMAC-signed, expires after 1 hour, no session needed). The backend copy is deleted once the job is `done`. Uploaded PDFs stay on the backend; the Paper Analyst reads them by input id.
+
+### POST `/projects` behaviour after M2
+The response's `status` is `planning`. Intake runs in the background (metadata fetch, facts, Brief; emits `intake.brief` and one `agent.activation` per agent), then the Meta-Controller drafts the plan and a `plan` approval is created (`approval.requested`); the run moves to `awaiting_approval`. Approving moves it to `running`; rejecting re-plans with the comment; an expired plan approval cancels the run.
 
 ### POST `/projects/{project_id}/runs`
 Start a new run in an existing project. Body: `{ "goal": "...", "budget": {...} }`.
@@ -123,8 +128,12 @@ Start a new run in an existing project. Body: `{ "goal": "...", "budget": {...} 
 }
 ```
 
+The response also carries `inputs` (with fetched titles) and `ready` (false until intake has finished).
+
 ### GET `/runs/{run_id}/plan` , GET `/runs/{run_id}/plan/revisions`
-Current task graph (tasks, owners, dependencies, `required_tags`) and the revision history: `{ "version", "trigger", "kind": "initial|minor|major", "diff", "reason", "approval_id" }`.
+Plan: `{ "version", "mode", "pending_approval", "proposed" (the graph awaiting approval, else null), "tasks": [ { "task_id", "id", "task_type", "agent_id", "status", "required_tags", "depends_on" } ], "estimates" }`. A task with `agent_id: null` that is not an Executor task is a capability gap waiting for the ladder. Revisions: `{ "version", "trigger", "kind": "initial|minor|major", "diff", "reason", "approval_id", "created_at" }`.
+
+Task types in the graph (D-047): `extract_spec`, `find_candidates`, `search_baselines`, `audit_repo`, `setup_env`, `implement`, `design_exploratory`, `design_baseline_suite`, `run_baseline` (Executor), `evaluate`, `design_branches`, `select_branches` (Meta-Controller picks branches), `run_branches` (Executor), `evaluate_final`, `decide_branches` (Meta-Controller expands or prunes with evidence), `write_report`. Outside the graph: `intake`, `plan`, `replan`, `evolution_draft`, `debug`.
 
 ### POST `/runs/{run_id}/pause` , `/resume` , `/cancel`
 `pause` stops creating new jobs and suspends agent loops at the next step; running jobs finish. `cancel` also cancels jobs. Returns the run. `invalid_state` if the transition is illegal.
@@ -172,6 +181,11 @@ The same events are available as JSON from `GET /runs/{run_id}/events?after_id=&
 | `plan.revised` | `{ "version", "trigger", "kind", "reason", "approval_id" }` |
 | `candidates.ready` | `{ "approval_id", "count" }` |
 | `capability.gap` | `{ "task_id", "required_tags", "source": "planning\|runtime\|researcher" }` |
+| `agent.probation` | `{ "agent_id", "version", "result": "passed", "mean", "baseline" }` (a failed probation emits `agent.evolution` with `rollback` or `retire`) |
+| `memory.write` | `{ "entry_id", "kind", "source" }` |
+| `job.requeued` | `{ "job_id", "attempt", "reason" }` |
+| `job.denied` | `{ "type", "reason", "task_id" }` (policy refused to create the job) |
+| `replan.skipped` , `evolution.blocked` , `evolution.dropped` , `candidates.none` | Diagnostics: replan limit reached, 15-agent cap reached, empty draft, no candidate chosen |
 
 ## 6. Agents, tasks, transcripts
 
@@ -322,7 +336,10 @@ Marks `running`. `{ "attempt": 1 }`.
 `status`: `done`, `failed`, `timed_out`, `cancelled`. Idempotent per `job_id` plus `attempt`.
 
 ### POST `/worker/artifacts`
-Multipart upload for result files referenced by a job. Size capped; type allowlisted.
+Multipart: `job_id`, `attempt`, `path` (jail-relative), `file`. 50 MB cap; types `.json .csv .tsv .txt .md .log .png .svg .pdf`. Returns `{ "artifact_id", "sha256", "size" }`.
+
+### Experiment jobs (Executor, D-048)
+The Executor fills the Implementer's entry-point template (or a branch's `spec.entrypoint`) with `{seed}`, `{budget_min}`, `{results_path}` and `{spec_args}` (branch overrides as `--key value`), and sends `payload.results_path` (`results/<experiment_id>.json`). The worker reads that JSON back as the job's `metrics` (B's runner). B's harness result shape `{ "metrics": {...}, "param_count", "train_seconds", "status" }` is unwrapped by the backend; a flat `{ "metric": number }` also works. A `done` job with no numeric metrics counts as failed and goes to the Debugger (at most 2 debug cycles per experiment).
 
 Worker rules: poll `jobs/next` every `poll_interval_s` while idle; run at most the concurrency the capabilities allow; **re-check every command against the local policy** and return `status: failed` with `policy_denied` in `stderr_tail` if it violates it; never print the worker token.
 
@@ -340,7 +357,7 @@ Required worker behaviour:
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/memory?q=&kind=&source=` | Search and list with counts |
+| GET | `/memory?q=&kind=&source=` | With `q`: Librarian search, `{ "retrieved_by": "signature\|supermemory\|keyword", "entries": [...] }`. Without: latest 200 with `counts` of seeded and learned. Entry: `{ "id", "kind", "signature", "source", "content", "context", "success_count", "fail_count", "last_used_at", "created_at", "mirrored" }` |
 | GET | `/memory/{id}` | Detail |
 | GET | `/projects/{id}/notes` , POST, `PUT /notes/{id}` | Markdown notes; `source_ref` links to paper, experiment or task |
 
@@ -349,18 +366,21 @@ Required worker behaviour:
 ### Outbound (backend → n8n)
 `POST {N8N_WEBHOOK_URL}` with header `X-Signature: sha256=<hmac of body using N8N_SIGNING_SECRET>`.
 ```json
-{ "event": "approval_requested", "run_id": "run_...", "approval_id": "apr_...",
-  "summary": "Expand W2 to 3 seeds (~6 min)", "decision_url": "https://.../approve/<token>",
+{ "event": "approval_requested", "run_id": "run_...", "approval_id": "apr_...", "type": "plan",
+  "summary": "13 tasks, 8 agents, ~45 min",
+  "decisions": {
+    "approve": { "token": "<signed token>", "decision_url": "https://<backend>/api/v1/hooks/n8n/decide" },
+    "reject":  { "token": "<signed token>", "decision_url": "https://<backend>/api/v1/hooks/n8n/decide" } },
   "expires_at": "..." }
 ```
-Events: `approval_requested`, `job_failed`, `run_finished`.
+One token **per decision** (D-051): each is bound to the approval id and that one decision, expires after 30 minutes, and only its hash is stored. Using either token invalidates both. `job_failed` carries `{ "run_id", "job_id", "status", "summary" }`; `run_finished` carries `{ "run_id", "status", "summary" }`. Delivery is best effort and never blocks a run. Outbound calls are off unless `N8N_WEBHOOK_URL` and `N8N_SIGNING_SECRET` are set.
 
 ### Inbound (n8n → backend)
 `POST /hooks/n8n/decide`
 ```json
-{ "approval_id": "apr_...", "decision": "approve", "token": "<single-use signed token>" }
+{ "approval_id": "apr_...", "decision": "approve", "token": "<the token from decisions.approve>" }
 ```
-Token is single-use, bound to the approval id and decision options, and expires with the approval. Invalid, used or expired tokens return `403`.
+Token is single-use, bound to the approval id and one decision, and expires with the approval. Invalid, used, mismatched or expired tokens return `403`. Rate limit 30 requests per minute per IP.
 
 ## 12. Rate limits (initial)
 
@@ -370,6 +390,8 @@ Token is single-use, bound to the approval id and decision options, and expires 
 | Chat | 20 messages/min per run |
 | Worker log uploads | 10 req/s per worker |
 | Hook endpoints | 30 req/min per IP |
+
+All implemented (M5). Over-limit responses are `429 rate_limited` with `Retry-After`. JSON bodies over 1 MB are refused with `413` (uploads exempt). Worker, hook, upload-relay and health routes are outside the per-user dashboard limit.
 
 ## 13. Versioning
 

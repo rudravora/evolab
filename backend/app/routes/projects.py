@@ -1,22 +1,23 @@
-"""Projects, runs and run controls (API.md section 3). Intake facts, the Brief and planning arrive in M2;
-in M1 a new run goes straight to the fake agent's pipe check."""
+"""Projects, runs and run controls (API.md section 3): intake, the Research Brief, the plan and its
+revisions, chat, and dataset or paper uploads. A new run starts with background intake, then the
+Meta-Controller's plan waits for the researcher's approval."""
 
 from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import fake_agent, runs
+from .. import fake_agent, orchestrator, runs
 from ..deps import get_db
 from ..errors import ApiError
 from ..events import emit
 from ..ids import new_id
 from ..jobs import cancel_run_jobs
-from ..models import AgentTask, Approval, Input, Job, Project, Run, Worker
+from ..models import AgentTask, Approval, Branch, ChatMessage, Input, Job, PlanRevision, Project, Run, Worker
 from ..security import OWNER_ID, current_user
 
 router = APIRouter(tags=["projects"], dependencies=[Depends(current_user)])
@@ -100,9 +101,13 @@ def _run_out(db: Session, run: Run) -> RunOut:
     jobs = db.scalar(select(func.count()).select_from(Job).where(Job.run_id == run.id))
     pending = db.scalar(select(func.count()).select_from(Approval).where(Approval.run_id == run.id,
                                                                          Approval.status == "pending"))
+    active = sum(1 for r in (run.activation_json or []) if r.get("active"))
+    branches = db.scalar(select(func.count()).select_from(Branch).where(Branch.run_id == run.id))
+    use = orchestrator.usage(db, run)
     return RunOut(id=run.id, project_id=run.project_id, goal=run.goal, status=run.status,
-                  budget=run.budget_json or {}, usage={**(run.usage_json or {}), "jobs": jobs},
-                  counts={"pending_approvals": pending}, started_at=run.started_at, ended_at=run.ended_at)
+                  budget=run.budget_json or {}, usage={"wall_min": use["wall_min"], "tokens": use["tokens"], "jobs": jobs},
+                  counts={"agents_active": active, "branches": branches, "pending_approvals": pending},
+                  started_at=run.started_at, ended_at=run.ended_at)
 
 
 def _get_run(db: Session, run_id: str) -> Run:
@@ -112,19 +117,19 @@ def _get_run(db: Session, run_id: str) -> Run:
     return run
 
 
-def _start_run(db: Session, project: Project, goal: str | None, budget: dict) -> Run:
+def _start_run(db: Session, services, project: Project, goal: str | None, budget: dict) -> Run:
     entry_types = sorted({i.kind for i in db.scalars(select(Input).where(Input.project_id == project.id))} - {"note"})
     run = Run(id=new_id("run"), project_id=project.id, goal=goal, status="planning", entry_types_json=entry_types,
               budget_json={**DEFAULT_BUDGET, **budget}, usage_json={"wall_min": 0, "tokens": 0})
     db.add(run)
     db.flush()
     emit(db, run.id, "orchestrator", "run.status", {"status": "planning"})
-    fake_agent.start(db, run)
+    orchestrator.start_run(db, services, run)
     return run
 
 
 @router.post("/projects", response_model=ProjectCreated, status_code=201)
-def create_project(body: ProjectIn, db: Session = Depends(get_db)) -> ProjectCreated:
+def create_project(body: ProjectIn, request: Request, db: Session = Depends(get_db)) -> ProjectCreated:
     inputs = [i.model_dump() for i in body.inputs]
     goal = body.goal
     if body.example:
@@ -141,7 +146,7 @@ def create_project(body: ProjectIn, db: Session = Depends(get_db)) -> ProjectCre
         db.add(Input(id=new_id("inp"), project_id=project.id, kind=i["kind"], ref=i["ref"], source=i["source"],
                      meta_json={"untrusted": True}))
     db.flush()
-    run = _start_run(db, project, goal, body.budget.model_dump())
+    run = _start_run(db, request.app.state.services, project, goal, body.budget.model_dump())
     db.commit()
     return ProjectCreated(project_id=project.id, run_id=run.id, status=run.status,
                           entry_types=run.entry_types_json, worker_online=_worker_online(db))
@@ -174,11 +179,11 @@ class NewRunIn(BaseModel):
 
 
 @router.post("/projects/{project_id}/runs", response_model=RunOut, status_code=201)
-def new_run(project_id: str, body: NewRunIn, db: Session = Depends(get_db)) -> RunOut:
+def new_run(project_id: str, body: NewRunIn, request: Request, db: Session = Depends(get_db)) -> RunOut:
     p = db.get(Project, project_id)
     if p is None:
         raise ApiError(404, "not_found", "Project not found")
-    run = _start_run(db, p, body.goal or p.goal, body.budget.model_dump())
+    run = _start_run(db, request.app.state.services, p, body.goal or p.goal, body.budget.model_dump())
     db.commit()
     return _run_out(db, run)
 
@@ -202,7 +207,7 @@ def resume_run(run_id: str, db: Session = Depends(get_db)) -> RunOut:
     if run.status != "paused":
         raise ApiError(409, "invalid_state", "Run is not paused")
     runs.set_status(db, run, "running", "researcher")
-    fake_agent.resume(db, run)
+    fake_agent.resume(db, run)          # no-op unless the run is an M1 pipe check
     db.commit()
     return _run_out(db, run)
 
@@ -212,9 +217,7 @@ def cancel_run(run_id: str, db: Session = Depends(get_db)) -> RunOut:
     run = _get_run(db, run_id)
     runs.set_status(db, run, "cancelled", "researcher")
     cancel_run_jobs(db, run)
-    for task in db.scalars(select(AgentTask).where(AgentTask.run_id == run.id,
-                                                   AgentTask.status.not_in(("done", "failed", "cancelled")))):
-        task.status = "cancelled"
+    orchestrator.cancel_tasks(db, run)
     db.commit()
     return _run_out(db, run)
 
@@ -289,3 +292,97 @@ def job_logs(job_id: str, after_seq: int = Query(default=-1), db: Session = Depe
     q = (select(JobLog).where(JobLog.job_id == job_id, JobLog.attempt == j.attempt, JobLog.seq > after_seq)
          .order_by(JobLog.seq))
     return [LogOut(seq=l.seq, attempt=l.attempt, stream=l.stream, chunk=l.chunk, ts=l.ts) for l in db.scalars(q)]
+
+
+# --- brief, plan, revisions -----------------------------------------------------------------------
+
+@router.get("/runs/{run_id}/brief")
+def get_brief(run_id: str, db: Session = Depends(get_db)) -> dict:
+    run = _get_run(db, run_id)
+    brief = run.brief_json or {}
+    return {"entry_types": brief.get("entry_types", run.entry_types_json or []), "goal": run.goal,
+            "domain": brief.get("domain"), "inputs": brief.get("inputs", []), "facts": brief.get("facts", []),
+            "reference_targets": brief.get("reference_targets", []), "activation": run.activation_json or [],
+            "ready": run.brief_json is not None}
+
+
+@router.get("/runs/{run_id}/plan")
+def get_plan(run_id: str, db: Session = Depends(get_db)) -> dict:
+    run = _get_run(db, run_id)
+    tasks = [{"task_id": t.graph_key, "id": t.id, "task_type": t.task_type, "agent_id": t.agent_id, "status": t.status,
+              "required_tags": t.required_tags_json or [], "depends_on": t.depends_on_json or []}
+             for t in db.scalars(select(AgentTask).where(AgentTask.run_id == run.id, AgentTask.graph_key.is_not(None))
+                                 .order_by(AgentTask.created_at))]
+    plan = run.plan_json or {}
+    return {"version": run.plan_version, "mode": run.mode or plan.get("mode"), "pending_approval": bool(plan.get("pending")),
+            "proposed": plan.get("task_graph") if plan.get("pending") else None, "tasks": tasks,
+            "estimates": plan.get("estimates")}
+
+
+@router.get("/runs/{run_id}/plan/revisions")
+def plan_revisions(run_id: str, db: Session = Depends(get_db)) -> list[dict]:
+    _get_run(db, run_id)
+    return [{"version": r.version, "trigger": r.trigger, "kind": r.kind, "diff": r.diff_json, "reason": r.reason,
+             "approval_id": r.approval_id, "created_at": r.created_at}
+            for r in db.scalars(select(PlanRevision).where(PlanRevision.run_id == run_id).order_by(PlanRevision.version))]
+
+
+# --- chat (API.md section 4) ------------------------------------------------------------------------
+
+class ChatIn(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    target_agent_id: str | None = None
+
+
+@router.post("/runs/{run_id}/chat", status_code=202)
+def post_chat(run_id: str, body: ChatIn, request: Request, db: Session = Depends(get_db)) -> dict:
+    run = _get_run(db, run_id)
+    request.app.state.chat_limiter.check(run_id)
+    m = orchestrator.chat(db, request.app.state.services, run, body.message, body.target_agent_id)
+    db.commit()
+    return {"message_id": m.id}
+
+
+@router.get("/runs/{run_id}/chat")
+def get_chat(run_id: str, limit: int = Query(default=100, ge=1, le=500), db: Session = Depends(get_db)) -> list[dict]:
+    _get_run(db, run_id)
+    rows = list(db.scalars(select(ChatMessage).where(ChatMessage.run_id == run_id).order_by(ChatMessage.created_at.desc())
+                           .limit(limit)))[::-1]
+    return [{"id": m.id, "role": m.role, "content": m.content, "created_at": m.created_at} for m in rows]
+
+
+# --- uploads: POST /projects/{id}/inputs (multipart) ------------------------------------------------
+
+@router.post("/projects/{project_id}/inputs", status_code=201)
+def add_input(project_id: str, request: Request, kind: str = Form(...), file: UploadFile | None = File(default=None),
+              ref: str | None = Form(default=None), source: str | None = Form(default=None),
+              db: Session = Depends(get_db)) -> dict:
+    """Add an input mid-run (a re-planning trigger). Files: multipart `file`; otherwise `ref` + `source`."""
+    from ..uploads import store_upload
+    services = request.app.state.services
+    if kind not in ("paper", "question", "repo", "dataset", "note"):
+        raise ApiError(422, "validation_error", "kind must be paper, question, repo, dataset or note")
+    p = db.get(Project, project_id)
+    if p is None:
+        raise ApiError(404, "not_found", "Project not found")
+    if file is None:
+        if not ref or source not in ("url", "text", "worker_path"):
+            raise ApiError(422, "validation_error", "give a file, or ref and source")
+        try:
+            InputIn(kind=kind, source=source, ref=ref)          # same validation as POST /projects
+        except ValueError as exc:
+            raise ApiError(422, "validation_error", str(exc).splitlines()[-1][:300]) from exc
+        inp = Input(id=new_id("inp"), project_id=p.id, kind=kind, ref=ref, source=source, meta_json={"untrusted": True})
+        db.add(inp)
+        db.flush()
+    else:
+        if kind not in ("paper", "dataset"):
+            raise ApiError(422, "validation_error", "only paper and dataset inputs can be uploaded")
+        inp = store_upload(db, services, p, kind, file)
+    run = db.scalar(select(Run).where(Run.project_id == p.id).order_by(Run.started_at.desc()).limit(1))
+    if run is not None and run.status not in runs.TERMINAL and services.settings.pipeline == "agents":
+        from ..replan import request_replan
+        request_replan(db, run, {"type": "input_added", "input_id": inp.id, "kind": kind, "ref": inp.ref[:300]})
+    db.commit()
+    return {"id": inp.id, "kind": inp.kind, "source": inp.source, "ref": inp.ref,
+            "size_bytes": (inp.meta_json or {}).get("size_bytes")}

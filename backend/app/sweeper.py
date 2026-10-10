@@ -24,7 +24,7 @@ def _iso(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
-def sweep(db: Session, now: datetime | None = None) -> None:
+def sweep(db: Session, now: datetime | None = None, services=None) -> None:
     from .routes.approvals import apply_decision
 
     now = now or datetime.now(timezone.utc)
@@ -36,14 +36,14 @@ def sweep(db: Session, now: datetime | None = None) -> None:
     for job in db.scalars(select(Job).where(Job.status.in_(("claimed", "running")), Job.worker_id.in_(offline))):
         requeue_or_fail(db, job, "worker went offline")
     for a in db.scalars(select(Approval).where(Approval.status == "pending", Approval.expires_at < _iso(now))):
-        apply_decision(db, a, "expired", "system", "expired without a decision")
+        apply_decision(db, a, "expired", "system", "expired without a decision", services)
     db.commit()
 
 
-async def run_forever(sessionmaker) -> None:
+async def run_forever(sessionmaker, services=None) -> None:
     def once():
         with sessionmaker() as db:
-            sweep(db)
+            sweep(db, services=services)
 
     while True:
         try:

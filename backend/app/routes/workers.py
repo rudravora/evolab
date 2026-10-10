@@ -7,9 +7,9 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 
 from ..config import Settings, get_settings
@@ -200,8 +200,11 @@ def claim_next(worker: Worker = Depends(current_worker), db: Session = Depends(g
     """Atomic claim: one UPDATE ... WHERE status='pending' RETURNING, so two workers never get the same job.
     Jobs of paused, cancelled or finished runs are not handed out."""
     worker.status, worker.last_heartbeat = "online", now_iso()
+    # Upload relays may run while the run is still being planned: intake and the plan may need the data.
+    runnable = or_(Run.status == "running",
+                   and_(Job.type == "download", Run.status.in_(("planning", "awaiting_approval"))))
     candidate = (select(Job.id).join(Run, Run.id == Job.run_id)
-                 .where(Job.status == "pending", Run.status == "running")
+                 .where(Job.status == "pending", runnable)
                  .order_by(Job.created_at, Job.id).limit(1).scalar_subquery())
     job_id = db.scalar(update(Job).where(Job.id == candidate, Job.status == "pending")
                        .values(status="claimed", worker_id=worker.id, claimed_at=now_iso())
@@ -293,3 +296,18 @@ def post_result(job_id: str, body: ResultIn, worker: Worker = Depends(current_wo
                metrics=body.metrics, files=[f.model_dump() for f in body.files])
     db.commit()
     return Ok()
+
+
+@worker_api.post("/artifacts", status_code=201)
+def upload_artifact(request: Request, job_id: str = Form(...), attempt: int = Form(...), path: str = Form(...),
+                    file: UploadFile = File(...), worker: Worker = Depends(current_worker), db: Session = Depends(get_db)) -> dict:
+    """Result files referenced by a job (size-capped, type-allowlisted)."""
+    from ..models import Artifact
+    from ..uploads import save_artifact
+
+    job = _own_job(db, worker, job_id, attempt)
+    dest, size, digest = save_artifact(request.app.state.services, job.run_id, job.id, path, file)
+    art = Artifact(id=new_id("art"), run_id=job.run_id, kind="job_file", path=str(dest), sha256=digest, size=size)
+    db.add(art)
+    db.commit()
+    return {"artifact_id": art.id, "sha256": digest, "size": size}

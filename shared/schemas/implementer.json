@@ -20,6 +20,7 @@
       }
     },
     "entrypoints": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "workdir": { "type": ["string", "null"], "description": "Working directory for the entry points, relative to the project workspace" },
     "signals": { "$ref": "#/$defs/signals" },
     "suggested_next": { "type": ["string", "null"] }
   },
