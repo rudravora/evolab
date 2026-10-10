@@ -4,6 +4,7 @@ name: worker-tests
   pull_request: {}
   push:
     branches:
+      - "main"
       - "b/**"
 
 # Least privilege: this workflow only needs to read the repo and report
