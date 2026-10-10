@@ -1,0 +1,27 @@
+{
+  "config": {
+    "budget_min": 1.0,
+    "method": "linear",
+    "n_samples": 200,
+    "seed": 0,
+    "task": "toy_regression"
+  },
+  "error_signature": null,
+  "method": "linear",
+  "metrics": {
+    "test_mse": 0.0123,
+    "train_mse": 0.0098
+  },
+  "paper_slug": "_dummy",
+  "param_count": 3,
+  "run_id": "run_0123456789abcdef",
+  "seed": 0,
+  "software_versions": {
+    "numpy": "2.5.3",
+    "python": "3.14.7",
+    "scikit-learn": "1.9.1"
+  },
+  "status": "done",
+  "task": "toy_regression",
+  "train_seconds": 0.42
+}

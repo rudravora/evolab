@@ -1,0 +1,11 @@
+# Base configuration for this paper's task.py run(config).
+# The harness merges `task`, `method`, `seed` and `budget_min` on top of
+# whatever is here (from the --task/--method/--seed/--budget-min CLI flags),
+# so don't rely on this file to set those four keys -- they're always
+# overwritten by the CLI invocation.
+#
+# Everything else here is paper-specific: hyperparameter defaults, dataset
+# paths, model sizes, etc. Copy this file's shape when adding a new paper.
+
+example_hyperparameter: 1.0
+example_dataset_path: "data/example.csv"

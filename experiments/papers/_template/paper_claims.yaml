@@ -1,0 +1,15 @@
+# Fill this in BY HAND from the actual paper before reproducing anything.
+# One entry per claim you intend to check against your own results.
+#
+# claim_text: the claim as stated or closely paraphrased from the paper
+# metric: the metric name this claim is about (should match a key your
+#         task.py's run() returns in its metrics dict)
+# claimed_value: the number (or range) the paper reports
+# source_page: page number (or figure/table id) where the claim appears
+#
+# Example (replace before using):
+claims:
+  - claim_text: "Method X achieves lower test error than baseline Y at a similar parameter count."
+    metric: test_mse
+    claimed_value: 0.0  # VERIFY: replace with the paper's actual reported number
+    source_page: "VERIFY: page or table number"
