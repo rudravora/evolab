@@ -1,0 +1,13 @@
+{
+  "report_md": "# KAN vs MLP\n\nVerdict (paper claim): partial.\n",
+  "why_differs": [
+    {
+      "ledger_entry_id": "led_1",
+      "explanation": "Training on CPU with fewer steps",
+      "measured_effect": null
+    }
+  ],
+  "findings": [],
+  "signals": [],
+  "suggested_next": null
+}

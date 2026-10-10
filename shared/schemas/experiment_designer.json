@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "evolab/experiment_designer.json",
+  "title": "Experiment Designer output",
+  "description": "AGENTS.md section 4. The Designer proposes; the Meta-Controller decides.",
+  "type": "object",
+  "required": ["branches", "signals"],
+  "properties": {
+    "branches": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["hypothesis", "spec", "est_cost", "expected_effect", "kind"],
+        "properties": {
+          "hypothesis": { "type": "string", "minLength": 1 },
+          "spec": { "type": "object" },
+          "est_cost": {
+            "type": "object",
+            "properties": {
+              "wall_min": { "type": "number", "minimum": 0 },
+              "jobs": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "expected_effect": { "type": "string" },
+          "kind": { "enum": ["whatif", "exploratory", "baseline", "transfer"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "signals": { "$ref": "#/$defs/signals" },
+    "suggested_next": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["signal", "evidence"],
+        "properties": {
+          "signal": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

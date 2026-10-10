@@ -15,7 +15,6 @@ Unresolved items. Each has an owner (role A, B or C, see COORDINATION.md) and a 
 | Q-07 | Exact function definitions and settings used in the KAN paper for the three tasks; `pykan` version to pin | Reproduction target | B | M0 | Written from memory in CONTEXT.md; `VERIFY` |
 | Q-08 | Is the "KAN or MLP: A Fairer Comparison" finding as we remember? | Sets honest expectations and the fairness what-if | B | M2 | Read the paper before writing the report |
 | Q-09 | Which OS do the three team laptops run? | Resource limits and process-group kill differ on Windows | B | M0 | Affects worker implementation |
-| Q-10 | Embeddings for memory: use or skip in v1? | Time vs value | A | M2 | Keyword search plus exact signatures may be enough; lean to skip with only 3 devs |
 | Q-11 | Auto-approve mode for the demo? | Smooth demo vs showing the approval flow | Team | M4 | Suggest: manual approvals on stage, with the phone approval moment if n8n survives the cut ladder |
 | Q-14 | Submission requirements: PPT or deck for Unstop, repo link, demo video? | Deliverables | C | Before round | Not yet planned |
 | Q-15 | Repo name, license, and public vs private | Voroa deploys from GitHub | A | Kickoff | |
@@ -26,6 +25,10 @@ Unresolved items. Each has an owner (role A, B or C, see COORDINATION.md) and a 
 | Q-20 | Ship the 22 domain template stubs in v1 (about an hour), or leave the template library empty? | Ladder step 3 visibility vs scope | Team | M4 | Empty library keeps the tabular gap a genuine fresh spawn |
 | Q-21 | Scope checkpoint: if the paper path is not end to end by M2, which later path is reduced first? | Four full-depth paths on a 3-person team | Team | M2 | Default order of reduction: question, then dataset (D-037) |
 | Q-22 | Capability tag vocabulary: the fixed list of tags agents and tasks may use | Matching, gap detection and spawning depend on it | A | M0 | Start from the examples in WORKFLOW.md |
+| Q-23 | Gateway rate limits | Concurrency cap | A | M0 | **Tested 2026-10-10:** all three models return 200, but the gateway drops the `tools` field (prompt tokens 13–15 with a tool attached; no `tool_calls`), so the agent loop uses a JSON-in-text tool protocol. No rate-limit headers are returned; limits must be asked of the organizers. GPT models spend most of `max_completion_tokens` on reasoning (64 of 74 tokens for a one-word answer), so caps must leave room for it. Also known: one gateway, `Authorization: Bearer <TEAM_API_KEY>`, OpenAI Chat Completions JSON, `stream: false`, text only, **48 KB max request**; IDs `gpt-5.6-luna`, `deepseek-v4-pro`, `gpt-5-mini`; output cap `max_completion_tokens` (GPT) / `max_tokens` (DeepSeek) |
+| Q-24 | Supermemory: SDK version to pin, plan limits, and whether paper text and transcripts may be sent there | Librarian implementation and data policy | A | M0 | SDK docs show two API shapes (`container_tags`/`search.documents` vs `container_tag`/`search.memories`); `VERIFY` against the pinned version |
+| Q-25 | LangSmith: plan, retention, and what is scrubbed from traces | Untrusted inputs and secrets leave the backend | A | M0 | `VERIFY` env var names (`LANGSMITH_TRACING` vs older `LANGCHAIN_TRACING_V2`) for the pinned SDK |
+| Q-26 | Council cost: 3 extra LLM calls per agent task. Score every task, or sample when rate-limited? | Rate limits may bind before M3 | A | M2 | Default: every task, async, `FEATURE_COUNCIL` to turn off |
 
 ## Resolved
 
@@ -39,3 +42,5 @@ Unresolved items. Each has an owner (role A, B or C, see COORDINATION.md) and a 
 | Q-R6 | Where do uploaded dataset files live? (was Q-13) | Datasets by URL, upload or worker path, no cap for now (D-034); storage detail continues as Q-18 | 2026-10-10 |
 | Q-R7 | Which entry paths, at what depth? | All four at full depth, paper first (D-028) | 2026-10-10 |
 | Q-R8 | How are agents chosen for combined inputs, and who decides the next agent? | Dynamic activation (D-031) and hybrid planning (D-032) | 2026-10-10 |
+| Q-R9 | Embeddings for memory? (was Q-10) | Retrieval moves to Supermemory (D-038); no local embeddings | 2026-10-10 |
+| Q-R10 | Which LLM models? (was part of Q-02) | GPT-5.6 Luna, DeepSeek V4 Pro, GPT-5 Mini in three tiers (D-041); IDs and limits continue as Q-23 | 2026-10-10 |

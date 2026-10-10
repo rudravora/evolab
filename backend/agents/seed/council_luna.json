@@ -1,0 +1,28 @@
+{
+  "agent": {
+    "id": "agt_council_luna",
+    "name": "Council Judge (GPT-5.6 Luna)",
+    "role": "council_judge",
+    "kind": "core",
+    "status": "active",
+    "origin": "seed"
+  },
+  "version": {
+    "version": 1,
+    "model": "strong",
+    "tools": [
+      "finish"
+    ],
+    "capability_tags": [
+      "council:judge"
+    ],
+    "system_prompt_file": "prompts/council_judge.md",
+    "output_schema": "council_judge.json",
+    "reason": "Seed version; one judge per model family (D-040)",
+    "parent_version_id": null
+  },
+  "evolvable": false,
+  "council_evaluated": false,
+  "counts_toward_active_cap": false,
+  "max_steps": 2
+}

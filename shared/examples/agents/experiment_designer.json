@@ -1,0 +1,30 @@
+{
+  "branches": [
+    {
+      "hypothesis": "KAN advantage shrinks with label noise sigma=0.1",
+      "spec": {
+        "noise_sigma": 0.1
+      },
+      "est_cost": {
+        "wall_min": 6,
+        "jobs": 3
+      },
+      "expected_effect": "RMSE gap narrows",
+      "kind": "whatif"
+    },
+    {
+      "hypothesis": "A tuned MLP closes the gap",
+      "spec": {
+        "mlp_tuning": "grid over width and lr"
+      },
+      "est_cost": {
+        "wall_min": 12,
+        "jobs": 6
+      },
+      "expected_effect": "fairer comparison",
+      "kind": "whatif"
+    }
+  ],
+  "signals": [],
+  "suggested_next": null
+}

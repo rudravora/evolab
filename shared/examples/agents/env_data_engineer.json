@@ -1,0 +1,31 @@
+{
+  "lockfile_path": "runs/kan_vs_mlp/requirements.lock",
+  "loader_path": "runs/kan_vs_mlp/code/load_tabular.py",
+  "data_card": {
+    "source": "url",
+    "license": "CC BY 4.0"
+  },
+  "dataset_profile": {
+    "rows": 20640,
+    "columns": [
+      "id",
+      "x1",
+      "x2",
+      "y"
+    ],
+    "target": "y",
+    "missing": {
+      "x2": 12
+    },
+    "leakage_flags": [
+      "id is monotonic with y"
+    ]
+  },
+  "signals": [
+    {
+      "signal": "data_issue",
+      "evidence": "column id correlates 0.97 with target y"
+    }
+  ],
+  "suggested_next": null
+}

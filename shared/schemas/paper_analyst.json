@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "evolab/paper_analyst.json",
+  "title": "Paper Analyst output",
+  "description": "AGENTS.md section 4. `mode` selects paper (spec extraction), question (3-5 candidate papers) or baselines (published results for a dataset).",
+  "type": "object",
+  "required": ["mode", "signals"],
+  "properties": {
+    "mode": { "enum": ["paper", "question", "baselines"] },
+    "claim": { "type": "string" },
+    "metric": { "type": "string" },
+    "datasets": { "type": "array", "items": { "type": "string" } },
+    "architecture": { "type": "string" },
+    "hyperparams": { "type": "object" },
+    "missing_details": { "type": "array", "items": { "type": "string" } },
+    "repo_candidates": { "type": "array", "items": { "type": "string" } },
+    "domain": { "enum": ["materials", "edge-ml", "cpu-ml", "3d", "general"] },
+    "candidates": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "required": ["title", "url", "why"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1 },
+          "url": { "type": "string", "pattern": "^https?://" },
+          "why": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "baselines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["model", "metric", "value", "source"],
+        "properties": {
+          "model": { "type": "string" },
+          "metric": { "type": "string" },
+          "value": { "type": "number" },
+          "source": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "signals": { "$ref": "#/$defs/signals" },
+    "suggested_next": { "type": ["string", "null"] }
+  },
+  "allOf": [
+    { "if": { "properties": { "mode": { "const": "paper" } } },
+      "then": { "required": ["claim", "metric", "datasets", "architecture", "hyperparams", "missing_details", "repo_candidates", "domain"] } },
+    { "if": { "properties": { "mode": { "const": "question" } } },
+      "then": { "required": ["candidates"] } },
+    { "if": { "properties": { "mode": { "const": "baselines" } } },
+      "then": { "required": ["baselines"] } }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["signal", "evidence"],
+        "properties": {
+          "signal": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

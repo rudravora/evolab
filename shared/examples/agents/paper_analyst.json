@@ -1,0 +1,29 @@
+{
+  "mode": "paper",
+  "claim": "KANs reach lower test RMSE than parameter-matched MLPs on symbolic regression tasks",
+  "metric": "test RMSE",
+  "datasets": [
+    "synthetic special functions"
+  ],
+  "architecture": "KAN with B-spline activations on edges",
+  "hyperparams": {
+    "grid": 5,
+    "k": 3,
+    "optimizer": "LBFGS",
+    "steps": 200
+  },
+  "missing_details": [
+    "exact noise level for the toy datasets"
+  ],
+  "repo_candidates": [
+    "https://github.com/KindXiaoming/pykan"
+  ],
+  "domain": "cpu-ml",
+  "signals": [
+    {
+      "signal": "dataset_not_in_paper",
+      "evidence": "supplied tabular dataset is not named in the paper"
+    }
+  ],
+  "suggested_next": null
+}

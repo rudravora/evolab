@@ -1,0 +1,33 @@
+{
+  "agent": {
+    "id": "agt_experiment_designer",
+    "name": "Experiment Designer",
+    "role": "experiment_designer",
+    "kind": "seed",
+    "status": "active",
+    "origin": "seed"
+  },
+  "version": {
+    "version": 1,
+    "model": "strong",
+    "tools": [
+      "read_memory",
+      "propose_branch",
+      "get_budget",
+      "finish"
+    ],
+    "capability_tags": [
+      "design:whatif",
+      "design:exploratory",
+      "design:baseline-suite"
+    ],
+    "system_prompt_file": "prompts/experiment_designer.md",
+    "output_schema": "experiment_designer.json",
+    "reason": "Seed version",
+    "parent_version_id": null
+  },
+  "evolvable": true,
+  "council_evaluated": true,
+  "counts_toward_active_cap": true,
+  "max_steps": 12
+}

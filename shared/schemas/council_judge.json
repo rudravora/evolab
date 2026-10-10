@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "evolab/council_judge.json",
+  "title": "Council judge output (one judge, one agent task)",
+  "description": "AGENTS.md section 5a. Each of the three judges returns this for every finished agent task. `overall` is the judge's score Q_j in [0, 1]; code aggregates the three into Q. Judges do not emit signals: they never influence the plan, only the reward.",
+  "type": "object",
+  "required": ["scores", "overall", "rationale", "failure_pattern", "confidence"],
+  "properties": {
+    "scores": {
+      "type": "object",
+      "required": ["task_fulfilment", "correctness", "contract_adherence", "efficiency", "honesty"],
+      "properties": {
+        "task_fulfilment": { "type": "number", "minimum": 0, "maximum": 1 },
+        "correctness": { "type": "number", "minimum": 0, "maximum": 1 },
+        "contract_adherence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "efficiency": { "type": "number", "minimum": 0, "maximum": 1 },
+        "honesty": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "overall": { "type": "number", "minimum": 0, "maximum": 1 },
+    "rationale": { "type": "string", "minLength": 1, "maxLength": 1200 },
+    "failure_pattern": {
+      "description": "Short, reusable label for the main defect (e.g. 'ignored missing_details', 'wrong pykan API'), or null. Two matching labels count as 'the same failure pattern twice' for the refine trigger.",
+      "type": ["string", "null"],
+      "maxLength": 80
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "additionalProperties": false
+}

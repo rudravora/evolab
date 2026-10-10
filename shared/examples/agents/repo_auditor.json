@@ -1,0 +1,19 @@
+{
+  "runs": true,
+  "framework": "pytorch",
+  "cuda_required": false,
+  "paper_code_consistency": "consistent: grid extension and pruning match section 2",
+  "cpu_feasible": true,
+  "license": "MIT",
+  "recommended_mode": "A",
+  "inferred_claim": null,
+  "reported_numbers": [],
+  "linked_paper": "https://arxiv.org/abs/2404.19756",
+  "signals": [
+    {
+      "signal": "repo_links_paper",
+      "evidence": "README cites arXiv 2404.19756"
+    }
+  ],
+  "suggested_next": null
+}

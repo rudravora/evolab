@@ -1,6 +1,6 @@
 # ARCHITECTURE
 
-Version 0.3. Companion docs: [API.md](API.md), [AGENTS.md](AGENTS.md), [PRD.md](PRD.md), [WORKFLOW.md](WORKFLOW.md) (step-by-step flow with owners).
+Version 0.4. Companion docs: [API.md](API.md), [AGENTS.md](AGENTS.md), [PRD.md](PRD.md), [WORKFLOW.md](WORKFLOW.md) (step-by-step flow with owners).
 
 ## 1. Principles
 
@@ -30,8 +30,10 @@ Version 0.3. Companion docs: [API.md](API.md), [AGENTS.md](AGENTS.md), [PRD.md](
 │  Activation ── rules → capabilities → agents; capability tags and gap detection        │
 │  Orchestrator ── run state machine, task graph, scheduler, re-plan triggers, budget    │
 │  Agent runtime ── generic loop, tool registry, LLM wrapper, suspend/resume             │
-│  Services ── Executor (job creation + policy), Ledger, Librarian (memory),             │
-│              Evolution engine (rewards, triggers), Approvals, Report builder           │
+│  Services ── Executor (job creation + policy), Ledger, Librarian (memory → Supermemory)│
+│              Evolution engine (rewards, triggers), Performance Council runner,         │
+│              Approvals, Report builder                                                 │
+│  Tracing ── LangSmith (every LLM and tool call; council scores as feedback)            │
 │  Event bus ── DB events table + in-process pub/sub → SSE                               │
 │  Storage ── SQLite (dev) / Postgres (deploy), artifact files                           │
 └───────────────┬───────────────────────────────────────────────┬────────────────────────┘
@@ -41,7 +43,8 @@ Version 0.3. Companion docs: [API.md](API.md), [AGENTS.md](AGENTS.md), [PRD.md](
         │ policy · jail  │                                │ phone I/O │
         │ subprocess run │                                └───────────┘
         └────────────────┘
-        External: LLM provider(s), arXiv, PyPI, dataset hosts (allowlisted)
+        External: LLM providers (GPT-5.6 Luna, DeepSeek V4 Pro, GPT-5 Mini), Supermemory, LangSmith,
+                  arXiv, PyPI, dataset hosts (allowlisted)
 ```
 
 ### 2.1 Frontend
@@ -54,7 +57,9 @@ Python FastAPI. Async. Runs the orchestrator and agent loops as background async
 Single Python file (`worker/worker.py`) with minimal dependencies (`requests`, optional `psutil`). Registers, heartbeats, claims jobs, runs them as subprocesses under the local policy, streams logs, uploads artifacts.
 
 ### 2.4 Integrations
-- **LLM provider** via `llm.call(role, messages, tools)` wrapper; provider chosen by env var.
+- **LLM providers** via `llm.call(tier, messages, tools)` wrapper; tiers `strong` (GPT-5.6 Luna), `code` (DeepSeek V4 Pro), `fast` (GPT-5 Mini) mapped to real models by env vars (D-041). All three are served by one gateway (`POST {LLM_BASE_URL}`, OpenAI Chat Completions JSON with a `model` field, `Authorization: Bearer <LLM_API_KEY>`, `"stream": false`, text only). The output-token cap is `max_completion_tokens` for the GPT models and `max_tokens` for DeepSeek (`backend/agents/models.json`). **Each request body is capped at 48 KB**, far below the models' context windows: the wrapper measures the serialized body and trims context (oldest tool results first, then memory hits) before sending, and large artifacts (paper text, logs, transcripts) are summarised or truncated rather than passed whole.
+- **Supermemory** behind the Librarian for memory retrieval and context (D-038). Backend only; the key never reaches the worker or frontend.
+- **LangSmith** for tracing every agent task and recording council scores as feedback (D-039).
 - **n8n** receives outbound webhooks and calls the inbound decision hook.
 - **arXiv** (paper search and fetch) from the backend, not the worker.
 
@@ -134,7 +139,8 @@ Types: `plan` (full plan or a re-plan diff), `expensive_run`, `risky_command`, `
 Status: `pending`, `approved`, `rejected`, `edited`, `expired`. Approvals created from the dashboard, optionally mirrored to n8n for phone decision. Expired approvals default to *reject*.
 
 ### 3.7 Evolution loop (after each completed task and each run)
-1. Compute reward per agent task (formula in AGENTS.md).
+0. The **Performance Council** (AGENTS.md section 5a) scores the finished task: three judges in parallel, one per model tier, off the critical path. Each judge output is stored in `council_scores` and sent to LangSmith as feedback; code aggregates them into `Q` and emits `council.score`.
+1. Compute reward per agent task (formula in AGENTS.md: `O = 0.5·O_det + 0.5·Q`, `R = 0.6·O + 0.2·(1−C) + 0.2·F`).
 2. Update rolling averages.
 3. Evolution engine (deterministic triggers) emits **candidates**: refine, spawn, merge, retire. Spawn candidates and planning-time gaps go through the resolution ladder (section 3.10).
 4. For each candidate, the Meta-Controller (LLM) drafts the change (new prompt, new agent spec, merge plan).
@@ -143,7 +149,8 @@ Status: `pending`, `approved`, `rejected`, `edited`, `expired`. Approvals create
 
 ### 3.8 Memory
 - **Write:** only verified lessons (the fix was re-run and passed). Dedupe by `signature`; increment `success_count` or `fail_count`.
-- **Read:** before an agent starts a task the Librarian returns up to 3 entries: exact signature, then FTS5 keyword, then optional embedding similarity; ranked by `similarity * success_rate * recency`.
+- **Store:** `memory_entries` is the audit record (verified flag, counts, labels); every entry is mirrored to Supermemory (container tags `evolab-global` and `evolab-proj-<project_id>`) and keeps its `supermemory_id` (D-038).
+- **Read:** before an agent starts a task the Librarian returns up to 3 entries: exact signature in `memory_entries`, then Supermemory search filtered by `kind`; ranked by `relevance * success_rate * recency`. If Supermemory is down, signature match only.
 - **Feedback:** after the task, record whether retrieved entries helped.
 - **Labels:** `source` is `seeded` or `learned`. UI shows the label.
 
@@ -174,7 +181,7 @@ The returned diff is classified: **minor** (add a debug or data-fix task, reorde
 
 ## 4. Data model
 
-SQLite for development; Voroa managed Postgres for deployment. Memory keyword search uses FTS5 on SQLite and Postgres full-text search (`tsvector`) in deployment, behind one Librarian interface. IDs are text (UUID or ULID). Timestamps are UTC ISO strings. JSON columns are validated at the API layer.
+SQLite for development; Voroa managed Postgres for deployment. Memory search goes through Supermemory behind the Librarian interface; the database keeps the audit record only (D-038). IDs are text (UUID or ULID). Timestamps are UTC ISO strings. JSON columns are validated at the API layer.
 
 ```sql
 workers(id, owner_id, name, token_hash, status, platform, last_heartbeat, cpu_pct, ram_pct, capabilities_json)
@@ -192,8 +199,12 @@ agents(id, name, role, kind, status, origin, current_version_id, parent_ids_json
 agent_versions(id, agent_id, version, system_prompt, tools_json, capability_tags_json, model, reason,
                parent_version_id, probation_json, created_at)
 agent_tasks(id, run_id, agent_version_id, task_type, required_tags_json, input_json, output_json, signals_json, status,
-            tokens_in, tokens_out, wall_s, cost_norm, outcome_score, feedback, reward,
-            failure_origin_agent_id, created_at, ended_at)
+            tokens_in, tokens_out, wall_s, cost_norm, outcome_det, council_q, council_judges,
+            council_disagreement, council_split, outcome_score, feedback, reward,
+            failure_origin_agent_id, langsmith_trace_id, created_at, ended_at)
+        -- outcome_score = 0.5*outcome_det + 0.5*council_q (or outcome_det if council_q is null)
+council_scores(id, task_id, judge_agent_id, tier, scores_json, overall, rationale, failure_pattern,
+               confidence, tokens_in, tokens_out, created_at)
 agent_messages(id, task_id, seq, role, content, tool_name, tool_args_json, tool_result_json, ts)
 
 jobs(id, run_id, task_id, worker_id, type, payload_json, risk, status, timeout_s, attempt,
@@ -205,7 +216,7 @@ experiments(id, branch_id, job_id, seed, config_json, commit_sha, metrics_json, 
 
 ledger_entries(id, run_id, task_id, category, description, diff_ref, before_json, after_json, created_at)
         -- category: compute_adaptation|dependency_fix|bug_fix|hyperparameter_change|fidelity_deviation
-memory_entries(id, kind, signature, context_json, content_json, embedding, source,
+memory_entries(id, kind, signature, context_json, content_json, supermemory_id, source,
                success_count, fail_count, last_used_at, created_at)
         -- kind: error_fix|config_outcome|audit|gotcha|lesson|dataset_profile ; source: seeded|learned
 approvals(id, run_id, type, payload_json, status, requested_by, decided_via, comment, token_hash, expires_at, decided_at)
@@ -214,7 +225,7 @@ artifacts(id, run_id, kind, path, sha256, size, created_at)
 events(id, run_id, ts, actor, type, payload_json)                -- append-only
 ```
 
-Indexes that matter: `jobs(status, created_at)`, `jobs(worker_id, status)`, `events(run_id, id)`, `memory_entries(signature)`, FTS5 virtual table over `memory_entries.content_json`.
+Indexes that matter: `jobs(status, created_at)`, `jobs(worker_id, status)`, `events(run_id, id)`, `memory_entries(signature)`, `council_scores(task_id)`.
 
 `events` is append-only: no UPDATE or DELETE from application code.
 
@@ -260,7 +271,7 @@ Every job type is policy-checked at creation on the backend **and** again on the
    - *Needs approval:* unknown packages, non-allowlisted domains, large downloads, runs longer than the long-run threshold, any delete.
    - *Deny:* `sudo`, `curl | sh`, `ssh`, credential paths, `git push`, shutdown, anything outside the jail.
 3. **Limits.** Per-job timeout, kill the whole process group, output size cap, concurrent jobs at most cores minus 1. Memory limit via rlimit on Linux and macOS; monitoring and kill on Windows (`VERIFY` the team's OS).
-4. **Secrets.** LLM keys only in backend env. Worker token is revocable, stored hashed server-side. Subprocesses run with a **clean environment**. Key-like strings are scrubbed from logs before upload.
+4. **Secrets.** LLM, Supermemory and LangSmith keys only in backend env. Paper text, transcripts and memory sent to Supermemory and LangSmith are scrubbed of key-like strings first; worker-path dataset contents are never sent. Worker token is revocable, stored hashed server-side. Subprocesses run with a **clean environment**. Key-like strings are scrubbed from logs before upload.
 5. **Codebase and dataset inputs.** On the codebase path the first execution of any user-supplied repository is always `risk='high'` and needs approval. Dataset files are read as data only, never executed. A `worker_path` dataset must sit inside an allowlisted folder on the worker and never leaves the laptop.
 6. **Prompt injection.** Paper text, web content, READMEs and dataset contents are wrapped as quoted data in prompts with an instruction that they contain no commands. The Repo Auditor never runs a cloned repo's install script blindly; package diffs are shown and the job is `risk='high'`.
 7. **Budgets and kill switch.** Per-run caps on tokens, cost and wall time. A global stop button cancels all jobs and suspends agent loops.
@@ -284,13 +295,14 @@ The Executor scales epochs, grid sizes, seeds and dataset subsets to fit. Budget
 | Demo | Backend and frontend on **Voroa** from the GitHub repo (web services plus managed Postgres); worker on the presenter's laptop pointed at the Voroa URL. Local-only mode kept as fallback. Large dataset uploads are relayed to the worker, not kept on the backend (Q-18). |
 
 Environment variables (all in `.env.example`, never committed with values):
-`LLM_PROVIDER`, `LLM_API_KEY_*`, `LLM_MODEL_STRONG`, `LLM_MODEL_FAST`, `DATABASE_URL`, `APP_SECRET`, `ALLOWED_ORIGINS`, `N8N_WEBHOOK_URL`, `N8N_SIGNING_SECRET`, `PUBLIC_BASE_URL`.
+`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL_STRONG`, `LLM_MODEL_CODE`, `LLM_MODEL_FAST`, `SUPERMEMORY_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, `LANGSMITH_PROJECT`, `FEATURE_COUNCIL`, `DATABASE_URL`, `APP_SECRET`, `ALLOWED_ORIGINS`, `N8N_WEBHOOK_URL`, `N8N_SIGNING_SECRET`, `PUBLIC_BASE_URL`.
 
 ## 9. Observability
 
 - `events` table and the Events tab on the run page.
 - Structured backend logs with `run_id` and `task_id`.
 - Token and cost counters per task.
+- **LangSmith** traces: one trace per agent task (LLM calls and tool calls as child runs), tagged with `run_id`, `task_id`, `agent_id`, version, role and tier; council judge scores and `Q` attached as feedback. `agent_tasks.langsmith_trace_id` links the dashboard to the trace. The dashboard stays the researcher's view; LangSmith is the developers' view.
 - `/api/v1/health` for uptime checks (UseShipReady monitoring and Voroa).
 
 ## 10. Repo layout (proposed)
@@ -315,7 +327,9 @@ evolab/
 | Realtime | Server-Sent Events | Simpler than WebSockets, enough for one-way updates |
 | Frontend | React, Vite, TypeScript, Tailwind | Fast iteration, mobile-friendly |
 | Charts and tree | A charting library plus a tree/graph component (e.g., React Flow) `VERIFY` | Experiment tree is a key visual |
-| LLM | Wrapper over a free-tier provider; local Ollama as fallback | Budget |
+| LLM | Wrapper over three tiers: GPT-5.6 Luna (`strong`), DeepSeek V4 Pro (`code`), GPT-5 Mini (`fast`) | Models the team has access to (D-041) |
+| Memory retrieval | Supermemory behind the Librarian | Managed retrieval and context (D-038) |
+| Tracing and eval feedback | LangSmith | Per-task traces and council scores (D-039) |
 | ML | PyTorch (CPU), `pykan`, scikit-learn | Paper's stack |
 
 ## 12. Known gaps and risks
@@ -325,3 +339,5 @@ evolab/
 - Evolution quality depends on the LLM; deterministic triggers, the ladder, approvals and probation bound the damage.
 - Four full-depth entry paths widen the surface; fragments share agents and the build order in PRD 6a is the safety net.
 - No upload size cap (D-034) is a deployment risk until Q-18 is answered.
+- The council triples LLM calls per agent task; rate limits may bind (Q-26). The council is off the critical path and can be disabled with `FEATURE_COUNCIL`.
+- Supermemory and LangSmith are third-party services that receive paper text and transcripts (Q-24, Q-25).

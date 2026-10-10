@@ -1,0 +1,34 @@
+{
+  "agent": {
+    "id": "agt_repo_auditor",
+    "name": "Repo Auditor",
+    "role": "repo_auditor",
+    "kind": "seed",
+    "status": "active",
+    "origin": "seed"
+  },
+  "version": {
+    "version": 1,
+    "model": "strong",
+    "tools": [
+      "create_job",
+      "read_file",
+      "read_memory",
+      "log_ledger",
+      "finish"
+    ],
+    "capability_tags": [
+      "repo:audit",
+      "repo:smoke-test",
+      "repo:infer-claim"
+    ],
+    "system_prompt_file": "prompts/repo_auditor.md",
+    "output_schema": "repo_auditor.json",
+    "reason": "Seed version",
+    "parent_version_id": null
+  },
+  "evolvable": true,
+  "council_evaluated": true,
+  "counts_toward_active_cap": true,
+  "max_steps": 12
+}

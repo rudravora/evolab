@@ -150,7 +150,7 @@ IDs are referenced in commits, issues and the DEVLOG.
 
 **Memory and ledger**
 - FR-16. Memory entries of types error_fix, config_outcome, audit, gotcha and lesson, with success and fail counts.
-- FR-17. Retrieval order: exact signature, then FTS keyword, then optional embedding similarity; top 3 injected into agent context; usefulness logged.
+- FR-17. Retrieval order: exact signature, then Supermemory search (D-038); top 3 injected into agent context; usefulness logged.
 - FR-18. Every deviation from the paper or official code is written to the ledger **at the moment of change** with a category.
 
 **Dashboard**
@@ -182,6 +182,11 @@ IDs are referenced in commits, issues and the DEVLOG.
 - FR-38. The Evaluator returns a typed verdict per reference target: `reproduced`, `partial`, `not_reproduced`, `baseline_established`, `exploratory`.
 - FR-39. Agents and tasks carry capability tags; gaps are resolved by the ladder (reuse, restore, instantiate template, specialise, fresh spawn); steps 2–5 need an `evolution` approval and pass a 2-task probation.
 - FR-40. The registry supports `kind: template`, `status: dormant` entries for domain agents; none are built or tested in v1.
+
+**Council, memory and tracing (v0.4)**
+- FR-41. A Performance Council of three judges (GPT-5.6 Luna, DeepSeek V4 Pro, GPT-5 Mini) scores every finished agent task; the median Q is blended into the outcome (`O = 0.5·O_det + 0.5·Q`); each judge's scores and rationale are visible on the task (D-040).
+- FR-42. Every agent task is traced in LangSmith, with council scores attached as feedback (D-039).
+- FR-43. Agents run on three model tiers (`strong`, `code`, `fast`) configured by env vars (D-041).
 
 ## 9. Non-functional requirements
 

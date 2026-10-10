@@ -1,0 +1,14 @@
+{
+  "patches": [
+    {
+      "file": "train_kan.py",
+      "diff": "--- a/train_kan.py\n+++ b/train_kan.py\n@@\n-device='cuda'\n+device='cpu'\n",
+      "category": "compute_adaptation"
+    }
+  ],
+  "entrypoints": [
+    "python train_kan.py --seed {seed} --steps {steps}"
+  ],
+  "signals": [],
+  "suggested_next": null
+}

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "evolab/repo_auditor.json",
+  "title": "Repo Auditor output",
+  "description": "AGENTS.md section 4.",
+  "type": "object",
+  "required": ["runs", "framework", "cuda_required", "paper_code_consistency", "cpu_feasible", "license", "recommended_mode", "inferred_claim", "reported_numbers", "linked_paper", "signals"],
+  "properties": {
+    "runs": { "type": "boolean" },
+    "framework": { "type": "string" },
+    "cuda_required": { "type": "boolean" },
+    "paper_code_consistency": { "type": ["string", "null"] },
+    "cpu_feasible": { "type": "boolean" },
+    "license": { "type": ["string", "null"] },
+    "recommended_mode": { "enum": ["A", "B", "C"] },
+    "inferred_claim": { "type": ["string", "null"] },
+    "reported_numbers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["metric", "value", "source"],
+        "properties": {
+          "metric": { "type": "string" },
+          "value": { "type": "number" },
+          "source": { "type": "string" }
+        }
+      }
+    },
+    "linked_paper": { "type": ["string", "null"] },
+    "signals": { "$ref": "#/$defs/signals" },
+    "suggested_next": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["signal", "evidence"],
+        "properties": {
+          "signal": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

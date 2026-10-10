@@ -1,0 +1,37 @@
+{
+  "agent": {
+    "id": "agt_paper_analyst",
+    "name": "Paper Analyst",
+    "role": "paper_analyst",
+    "kind": "seed",
+    "status": "active",
+    "origin": "seed"
+  },
+  "version": {
+    "version": 1,
+    "model": "strong",
+    "tools": [
+      "search_papers",
+      "fetch_pdf_text",
+      "find_repo",
+      "search_baselines",
+      "propose_candidates",
+      "read_memory",
+      "write_note",
+      "finish"
+    ],
+    "capability_tags": [
+      "paper:extract",
+      "paper:search",
+      "baseline:search"
+    ],
+    "system_prompt_file": "prompts/paper_analyst.md",
+    "output_schema": "paper_analyst.json",
+    "reason": "Seed version",
+    "parent_version_id": null
+  },
+  "evolvable": true,
+  "council_evaluated": true,
+  "counts_toward_active_cap": true,
+  "max_steps": 12
+}

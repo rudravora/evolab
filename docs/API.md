@@ -1,6 +1,6 @@
 # API
 
-Version 0.3. Base path: `/api/v1`. JSON everywhere unless noted. This file is the **contract between frontend, backend and worker**; change it by PR and tell the others (see COORDINATION.md). A machine-readable `shared/openapi.yaml` should be generated from the backend and committed.
+Version 0.5. Base path: `/api/v1`. JSON everywhere unless noted. This file is the **contract between frontend, backend and worker**; change it by PR and tell the others (see COORDINATION.md). A machine-readable `shared/openapi.yaml` should be generated from the backend and committed.
 
 ## 1. Conventions
 
@@ -24,6 +24,7 @@ Version 0.3. Base path: `/api/v1`. JSON everywhere unless noted. This file is th
   - branch: `proposed`, `awaiting_approval`, `queued`, `running`, `done`, `expanded`, `pruned`, `killed`
   - approval: `pending`, `approved`, `rejected`, `edited`, `expired`
   - agent: `active`, `inactive`, `retired`, `dormant`; kind: `core`, `seed`, `spawned`, `template`
+  - model tier: `strong`, `code`, `fast`
   - worker: `online`, `offline`
   - ledger category: `compute_adaptation`, `dependency_fix`, `bug_fix`, `hyperparameter_change`, `fidelity_deviation`
   - memory kind: `error_fix`, `config_outcome`, `audit`, `gotcha`, `lesson`, `dataset_profile`; source: `seeded`, `learned`
@@ -138,7 +139,8 @@ Chat history.
 | `agent.task` | `{ "task_id", "agent_id", "agent_name", "status", "summary" }` |
 | `agent.message` | `{ "task_id", "seq", "role", "content" }` (truncate large content; fetch full via transcript route) |
 | `agent.evolution` | `{ "action": "spawn\|refine\|merge\|retire\|restore", "ladder_step", "origin", "agent_id", "version", "reason" }` |
-| `agent.score` | `{ "agent_id", "task_id", "reward", "outcome", "cost", "feedback" }` |
+| `agent.score` | `{ "agent_id", "task_id", "reward", "outcome", "outcome_det", "council_q", "council_split", "cost", "feedback" }` (`outcome = 0.5·outcome_det + 0.5·council_q`; `council_q` null when the council was unavailable) |
+| `council.score` | `{ "task_id", "agent_id", "judges": [ { "judge_agent_id", "tier", "overall" } ], "q", "disagreement", "split" }` |
 | `job.status` | `{ "job_id", "status", "worker_id" }` |
 | `job.log` | `{ "job_id", "seq", "stream", "chunk" }` |
 | `branch.update` | `{ "branch_id", "status", "decision", "decision_reason", "priority_score" }` |
@@ -166,7 +168,8 @@ Chat history.
 | GET | `/agents/{agent_id}/versions` | Version timeline with `reason` and `parent_version_id` |
 | GET | `/agents/{agent_id}/versions/{version}` | Prompt and tools (diff against parent available via `?diff=1`) |
 | GET | `/runs/{run_id}/tasks` | Tasks for a run (filter `?agent_id=&status=`) |
-| GET | `/tasks/{task_id}` | Task detail including output and reward breakdown |
+| GET | `/tasks/{task_id}` | Task detail including output and reward breakdown (`outcome_det`, `council_q`, `council_split`, cost, feedback, reward) and `langsmith_trace_url` when tracing is on |
+| GET | `/tasks/{task_id}/council` | The three judges' outputs: `[ { "judge_agent_id", "tier", "scores", "overall", "rationale", "failure_pattern", "confidence" } ]` plus `q`, `disagreement`, `split` |
 | GET | `/tasks/{task_id}/messages` | Full transcript (the "why") |
 | POST | `/tasks/{task_id}/feedback` | `{ "value": "up\|down" }` |
 | GET | `/runs/{run_id}/agent-graph` | Nodes and edges (spawned-from, specialised-from, instantiated-from, merged-into) plus each node's activation state and reason, for the team view |
@@ -257,15 +260,34 @@ List workers and status. `DELETE /workers/{id}` revokes the token.
 Atomic claim. `204` if nothing; otherwise `200`:
 ```json
 {
-  "job_id": "job_...", "attempt": 1, "type": "shell",
-  "payload": { "argv": ["python", "train_kan.py", "--seed", "0"], "cwd": "runs/kan_vs_mlp/code",
+  "job_id": "job_...", "project_id": "proj_...", "attempt": 1, "type": "shell",
+  "payload": { "argv": ["python", "train_kan.py", "--seed", "0"], "cwd": "code",
                "env": { "OMP_NUM_THREADS": "4" } },
   "timeout_s": 900, "max_output_bytes": 5000000
 }
 ```
+- **`project_id`** (always present) selects the jail: every job runs inside `WORKSPACE_ROOT/<project_id>/` on the worker.
+- **Paths:** `cwd` and every path in a payload (`path`, `dest`, `paths`) are relative to that jail. The worker rejects absolute paths and any `..` segment with `policy_denied`. The backend applies the same check when the job is created.
+- **Attempts and retries:** `attempt` starts at 1. A job lost to a worker that goes offline is requeued with `attempt + 1`, at most 2 times (max attempt 3); after that it is `failed`.
+
 Uploaded datasets are relayed to the worker as a `download` job from a short-lived signed backend URL and then removed from the backend (Q-18). `worker_path` datasets are read in place.
 
-`type` values: `shell` (argv, never a shell string), `python_script`, `pip_install` (`{ "packages": ["pykan==0.2.8"] }`), `write_file` (`{ "path", "content" or "artifact_id" }`), `read_file`, `list_dir`, `git` (`{ "op": "init|commit|diff", "args": {...} }`), `download` (`{ "url", "dest", "sha256?" }`).
+`type` values and payloads:
+
+| `type` | `payload` |
+|---|---|
+| `shell` | `{ "argv": [...], "cwd", "env" }`; argv list, never a shell string |
+| `python_script` | `{ "argv": ["python", "<file>.py", ...], "cwd", "env" }` |
+| `pip_install` | `{ "packages": ["pykan==0.2.8"] }` |
+| `write_file` | `{ "path", "content" or "artifact_id" }` |
+| `read_file`, `list_dir` | `{ "path" }` |
+| `git` | `{ "op": "init", "args": {} }` · `{ "op": "commit", "args": { "message": "..." } }` · `{ "op": "diff", "args": { "paths": [] } }` (empty `paths` = whole jail) |
+| `download` | `{ "url", "dest", "sha256?" }` |
+
+Two job kinds are conventions on existing types, not new `type` values:
+
+- **Dataset profiling** is a `python_script` job running `profile_dataset.py` (`argv: ["python", "profile_dataset.py", "--path", "<dataset path>"]`). Its result `metrics` carry the profile summary and `files` carry the full profile JSON.
+- **Repo smoke test** (WORKFLOW 3.2) is a `python_script` or `shell` job. Its result `metrics` must carry `{ "import_ok": bool, "tests_passed": int, "tests_failed": int }`. The first run of a user-supplied repository is `risk='high'` and needs approval (ARCHITECTURE section 6).
 
 ### POST `/worker/jobs/{job_id}/start`
 Marks `running`. `{ "attempt": 1 }`.
@@ -286,6 +308,16 @@ Marks `running`. `{ "attempt": 1 }`.
 Multipart upload for result files referenced by a job. Size capped; type allowlisted.
 
 Worker rules: poll `jobs/next` every `poll_interval_s` while idle; run at most the concurrency the capabilities allow; **re-check every command against the local policy** and return `status: failed` with `policy_denied` in `stderr_tail` if it violates it; never print the worker token.
+
+Required worker behaviour:
+
+| Situation | Behaviour |
+|---|---|
+| Backend unreachable or connection error | Retry with exponential backoff: 1 s, doubling, capped at 60 s. Never crash on a network error |
+| Stored token rejected (`401`, e.g. revoked or stale) | The worker exits with a message. Re-pairing needs a **new pairing code** from the dashboard (`PAIRING_CODE=... python worker.py`); the old token is not reused |
+| Log streaming | stdout and stderr are batched and sent about every 1 s via `/logs` |
+| Worker shutdown (Ctrl+C, `stop: true` from heartbeat) | Running jobs are killed (whole process group) and each is reported with `status: "cancelled"` via `/worker/jobs/{job_id}/result` before exit |
+| Cancel request (`cancel_job_ids` from heartbeat) | The job is killed and reported with `status: "cancelled"` |
 
 ## 10. Memory and notes
 

@@ -1,0 +1,37 @@
+{
+  "_doc": "Logical model tiers (AGENTS.md section 2, D-041). Agents name a tier; the LLM wrapper maps it to a real model ID through env vars. All three models are served by one gateway: POST {LLM_BASE_URL} with a `model` field. `output_param` is the request field that caps output tokens; it differs by model.",
+  "gateway": {
+    "base_url_env": "LLM_BASE_URL",
+    "api_key_env": "LLM_API_KEY",
+    "auth_header": "Authorization: Bearer <LLM_API_KEY>",
+    "request_format": "openai_chat_completions",
+    "stream": false,
+    "text_only": true,
+    "max_request_bytes": 49152,
+    "_note": "The 48 KB request cap binds long before the context windows below. The wrapper measures the serialized JSON body and trims context (oldest tool results first, then memory hits) to fit; it never sends an over-size request."
+  },
+  "tiers": {
+    "strong": {
+      "intended_model": "GPT-5.6 Luna (short context)",
+      "model_env": "LLM_MODEL_STRONG",
+      "output_param": "max_completion_tokens",
+      "context_tokens": 1050000,
+      "fallback": ["code", "fast"]
+    },
+    "code": {
+      "intended_model": "DeepSeek V4 Pro",
+      "model_env": "LLM_MODEL_CODE",
+      "output_param": "max_tokens",
+      "context_tokens": 1000000,
+      "fallback": ["strong", "fast"]
+    },
+    "fast": {
+      "intended_model": "GPT-5 Mini",
+      "model_env": "LLM_MODEL_FAST",
+      "output_param": "max_completion_tokens",
+      "context_tokens": 400000,
+      "fallback": ["strong"]
+    }
+  },
+  "council_note": "Council judges never fall back to another tier: a judge whose model is unavailable is skipped, so the council never contains two judges on the same model."
+}

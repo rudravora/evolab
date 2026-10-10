@@ -1,0 +1,20 @@
+{
+  "fixed": true,
+  "fix": {
+    "kind": "pin",
+    "detail": "pin pykan==0.2.8; KAN.train renamed to KAN.fit",
+    "rerun_job_id": "job_42"
+  },
+  "lesson": {
+    "error_class": "AttributeError: 'KAN' object has no attribute 'train'",
+    "libraries": {
+      "pykan": "0.2.8"
+    },
+    "summary": "Use KAN.fit in pykan>=0.2.x",
+    "verified": true
+  },
+  "escalate": false,
+  "failure_origin_agent_id": "agt_implementer",
+  "signals": [],
+  "suggested_next": null
+}

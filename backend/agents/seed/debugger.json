@@ -1,0 +1,36 @@
+{
+  "agent": {
+    "id": "agt_debugger",
+    "name": "Debugger",
+    "role": "debugger",
+    "kind": "seed",
+    "status": "active",
+    "origin": "seed"
+  },
+  "version": {
+    "version": 1,
+    "model": "code",
+    "tools": [
+      "read_logs",
+      "read_memory",
+      "read_file",
+      "write_file",
+      "create_job",
+      "log_ledger",
+      "write_memory",
+      "finish"
+    ],
+    "capability_tags": [
+      "debug:python",
+      "debug:deps"
+    ],
+    "system_prompt_file": "prompts/debugger.md",
+    "output_schema": "debugger.json",
+    "reason": "Seed version",
+    "parent_version_id": null
+  },
+  "evolvable": true,
+  "council_evaluated": true,
+  "counts_toward_active_cap": true,
+  "max_steps": 12
+}

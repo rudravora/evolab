@@ -1,0 +1,35 @@
+{
+  "agent": {
+    "id": "agt_env_data_engineer",
+    "name": "Environment and Data Engineer",
+    "role": "env_data_engineer",
+    "kind": "seed",
+    "status": "active",
+    "origin": "seed"
+  },
+  "version": {
+    "version": 1,
+    "model": "code",
+    "tools": [
+      "create_job",
+      "read_memory",
+      "write_memory",
+      "log_ledger",
+      "finish"
+    ],
+    "capability_tags": [
+      "env:setup",
+      "data:fetch",
+      "data:profile:tabular",
+      "data:leakage-check"
+    ],
+    "system_prompt_file": "prompts/env_data_engineer.md",
+    "output_schema": "env_data_engineer.json",
+    "reason": "Seed version",
+    "parent_version_id": null
+  },
+  "evolvable": true,
+  "council_evaluated": true,
+  "counts_toward_active_cap": true,
+  "max_steps": 12
+}

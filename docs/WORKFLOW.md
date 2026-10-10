@@ -1,6 +1,6 @@
 # WORKFLOW
 
-Version 0.3, 2026-10-10. The end-to-end workflow, step by step, with an owner for every step. Companion to [PRD.md](PRD.md), [ARCHITECTURE.md](ARCHITECTURE.md), [API.md](API.md) and [AGENTS.md](AGENTS.md). A live copy with rendered diagrams is kept as the shared doc "EvoLab Workflow".
+Version 0.4, 2026-10-10. The end-to-end workflow, step by step, with an owner for every step. Companion to [PRD.md](PRD.md), [ARCHITECTURE.md](ARCHITECTURE.md), [API.md](API.md) and [AGENTS.md](AGENTS.md). A live copy with rendered diagrams is kept as the shared doc "EvoLab Workflow".
 
 EvoLab turns any mix of a paper, question, codebase or dataset into an approved plan, runs it on the researcher's own laptop, and returns a report that explains its results. The Meta-Controller decides which agents work, re-plans when new facts arrive, and grows the team when a capability is missing.
 
@@ -33,7 +33,7 @@ Every step names two owners: who does it **while a run is live** (an agent, a se
 
 | Owner | Who | Examples |
 |---|---|---|
-| LLM agent | One of the 9 agents, run by the generic agent loop in the backend | Meta-Controller, Paper Analyst, Debugger |
+| LLM agent | One of the 9 agents or the 3 council judges, run by the generic agent loop in the backend | Meta-Controller, Paper Analyst, Debugger, Council judge |
 | Service | Plain code in the backend, no LLM | Executor, Ledger, Librarian, Intake classifier, Orchestrator |
 | Worker | `worker.py` on the researcher's laptop; runs jobs only | Clone, pip install, train, profile a dataset |
 | Researcher | The human, on desktop or phone | Approvals, chat, feedback, branch controls |
@@ -155,13 +155,14 @@ The orchestrator walks the approved task graph in plain code: when a task finish
 ### How one agent task runs
 
 1. Orchestrator picks an unblocked task and loads the agent's current version (prompt, tools, model).
-2. Librarian injects up to 3 memory entries, each labelled `seeded` or `learned`.
+2. Librarian injects up to 3 memory entries retrieved through Supermemory, each labelled `seeded` or `learned`.
 3. The agent loop calls the LLM; each tool call either runs inline in the backend (memory, ledger, notes, search) or becomes a **job** for the worker.
 4. A job-creating task is **suspended** (`waiting_for_job`); no LLM call is held open while code trains.
 5. Worker claims the job, runs it inside the jail, streams logs, returns exit code, metrics and files.
 6. Orchestrator appends the result to the task's history and resumes the loop.
 7. Agent calls `finish(output)`; output is validated against its JSON schema, including `signals[]` and optional `suggested_next`.
 8. Every change that departs from the paper or the official code is written to the Ledger **at that moment**, with a category.
+9. The whole task is one LangSmith trace. Once it ends, the **Performance Council** (three judges, one per model) scores it in the background; the orchestrator does not wait.
 
 ### Typical task chain (paper + codebase)
 
@@ -242,12 +243,13 @@ Decision rights stay fixed: the Designer **proposes**, the Evaluator **scores**,
 The run ends with a report the researcher can keep, rewards for every agent task, verified lessons in memory, and any evolution proposals waiting for approval.
 
 - **Report:** results tables and plots; a verdict per reference target, labelled with its type; "why results differ", built from the Ledger; for exploratory runs, findings, confidence and suggested next experiments; links to commits, logs and ledger entries.
-- **Rewards:** `R = 0.6 × O + 0.2 × (1 − C) + 0.2 × F`. Paper Analyst on the question path is scored on whether the researcher picked one of its candidates; the Repo Auditor on the codebase path is also scored on whether its inferred claim was confirmed.
+- **Rewards:** `R = 0.6 × O + 0.2 × (1 − C) + 0.2 × F`, where `O = 0.5 × O_det + 0.5 × Q`: half the role's objective check, half the Performance Council's median score (AGENTS.md section 5a). Paper Analyst on the question path is scored on whether the researcher picked one of its candidates; the Repo Auditor on the codebase path is also scored on whether its inferred claim was confirmed.
 - **Memory:** only verified lessons are written; duplicates increment counters. New kind `dataset_profile` lets a later dataset run skip re-profiling.
 
 | # | Step | Runtime owner | Build owner |
 |---|---|---|---|
 | 6.1 | Write the report and "why results differ" section | Reporter | A (agent), C (report view) |
+| 6.1a | Score every finished agent task with the three council judges; store scores; send them to LangSmith as feedback | Performance Council (3 LLM judges) + aggregation code | A |
 | 6.2 | Compute and store reward per agent task; update rolling averages | Evolution engine (code) | A |
 | 6.3 | Write verified lessons; record which retrieved entries helped | Librarian | A (B may take over) |
 | 6.4 | Check evolution triggers; draft proposals; create `evolution` approvals | Evolution engine, Meta-Controller | A |

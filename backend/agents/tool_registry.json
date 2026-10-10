@@ -1,0 +1,28 @@
+{
+  "_doc": "ARCHITECTURE.md section 5. Agents may only use tools listed here (no runtime tool creation). `restricted_to` limits a tool to the named roles.",
+  "tools": {
+    "finish": { "runs_on": "backend" },
+    "search_papers": { "runs_on": "backend", "untrusted_output": true },
+    "fetch_pdf_text": { "runs_on": "backend", "untrusted_output": true },
+    "find_repo": { "runs_on": "backend", "untrusted_output": true },
+    "search_baselines": { "runs_on": "backend", "untrusted_output": true },
+    "read_memory": { "runs_on": "backend", "service": "librarian" },
+    "write_memory": { "runs_on": "backend", "service": "librarian", "requires_verified": true },
+    "log_ledger": { "runs_on": "backend", "service": "ledger" },
+    "read_ledger": { "runs_on": "backend", "service": "ledger" },
+    "record_metric": { "runs_on": "backend" },
+    "write_note": { "runs_on": "backend" },
+    "read_logs": { "runs_on": "backend" },
+    "search_agents": { "runs_on": "backend", "restricted_to": ["meta_controller"] },
+    "match_agents": { "runs_on": "backend", "restricted_to": ["meta_controller"] },
+    "spawn_agent": { "runs_on": "backend", "restricted_to": ["meta_controller"] },
+    "replan": { "runs_on": "backend", "restricted_to": ["meta_controller"] },
+    "propose_branch": { "runs_on": "backend" },
+    "request_approval": { "runs_on": "backend" },
+    "get_budget": { "runs_on": "backend" },
+    "propose_candidates": { "runs_on": "backend", "restricted_to": ["paper_analyst"] },
+    "create_job": { "runs_on": "worker", "suspends_task": true },
+    "read_file": { "runs_on": "worker", "suspends_task": true },
+    "write_file": { "runs_on": "worker", "suspends_task": true }
+  }
+}

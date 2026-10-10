@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "evolab/implementer.json",
+  "title": "Implementer output",
+  "description": "AGENTS.md section 4. Patch `category` uses the ledger categories.",
+  "type": "object",
+  "required": ["patches", "entrypoints", "signals"],
+  "properties": {
+    "patches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "diff", "category"],
+        "properties": {
+          "file": { "type": "string", "minLength": 1 },
+          "diff": { "type": "string" },
+          "category": { "enum": ["compute_adaptation", "dependency_fix", "bug_fix", "hyperparameter_change", "fidelity_deviation"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "entrypoints": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "signals": { "$ref": "#/$defs/signals" },
+    "suggested_next": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["signal", "evidence"],
+        "properties": {
+          "signal": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

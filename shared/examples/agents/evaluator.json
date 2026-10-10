@@ -1,0 +1,21 @@
+{
+  "verdicts": [
+    {
+      "target": "inp_paper",
+      "target_type": "paper_claim",
+      "verdict": "partial",
+      "evidence": "KAN better on 2/3 tasks across 3 seeds; gap within variance on task 3",
+      "confidence": null
+    }
+  ],
+  "per_task": [],
+  "seed_variance": {
+    "kan_rmse": 0.0004
+  },
+  "outcome_scores": {
+    "agt_implementer": 0.8
+  },
+  "failure_origins": [],
+  "signals": [],
+  "suggested_next": null
+}

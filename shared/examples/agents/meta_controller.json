@@ -1,0 +1,108 @@
+{
+  "kind": "plan",
+  "activation": [
+    {
+      "agent_id": "agt_paper_analyst",
+      "active": true,
+      "reason": "paper supplied"
+    },
+    {
+      "agent_id": "agt_repo_auditor",
+      "active": true,
+      "reason": "codebase supplied; README cites the paper"
+    },
+    {
+      "agent_id": "agt_env_data_engineer",
+      "active": true,
+      "reason": "dataset supplied"
+    },
+    {
+      "agent_id": "agt_implementer",
+      "active": true,
+      "reason": "paper + different dataset: adapt code to new data"
+    },
+    {
+      "agent_id": "agt_experiment_designer",
+      "active": true,
+      "reason": "question frames the what-if branches; transfer what-if"
+    },
+    {
+      "agent_id": "agt_debugger",
+      "active": true,
+      "reason": "on demand"
+    }
+  ],
+  "task_graph": [
+    {
+      "task_id": "t1",
+      "task_type": "extract_spec",
+      "agent_id": "agt_paper_analyst",
+      "required_tags": [
+        "paper:extract"
+      ],
+      "depends_on": []
+    },
+    {
+      "task_id": "t2",
+      "task_type": "audit_repo",
+      "agent_id": "agt_repo_auditor",
+      "required_tags": [
+        "repo:audit",
+        "repo:smoke-test"
+      ],
+      "depends_on": [
+        "t1"
+      ]
+    },
+    {
+      "task_id": "t3",
+      "task_type": "setup_env_and_profile",
+      "agent_id": "agt_env_data_engineer",
+      "required_tags": [
+        "env:setup",
+        "data:profile:tabular"
+      ],
+      "depends_on": [
+        "t2"
+      ]
+    },
+    {
+      "task_id": "t4",
+      "task_type": "tabular_benchmark_protocol",
+      "agent_id": null,
+      "required_tags": [
+        "bench:tabular-protocol"
+      ],
+      "depends_on": [
+        "t3"
+      ]
+    }
+  ],
+  "mode": null,
+  "reference_targets": [
+    {
+      "type": "paper_claim",
+      "source": "inp_paper",
+      "rank": 1
+    },
+    {
+      "type": "repo_reported",
+      "source": "inp_repo",
+      "rank": 2
+    }
+  ],
+  "estimates": {
+    "wall_min": 45,
+    "tokens": 900000
+  },
+  "capability_gaps": [
+    {
+      "task_id": "t4",
+      "required_tags": [
+        "bench:tabular-protocol"
+      ]
+    }
+  ],
+  "signals": [],
+  "suggested_next": null
+}

@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "evolab/meta_controller.json",
+  "title": "Meta-Controller output",
+  "description": "AGENTS.md section 4. `kind` selects the mode: plan, replan, evolution_draft (draft for an evolution candidate or ladder step) or intake_judgement (one-line call on an ambiguous input).",
+  "type": "object",
+  "required": ["kind", "signals"],
+  "properties": {
+    "kind": { "enum": ["plan", "replan", "evolution_draft", "intake_judgement"] },
+    "activation": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["agent_id", "active", "reason"],
+        "properties": {
+          "agent_id": { "type": "string", "minLength": 1 },
+          "active": { "type": "boolean" },
+          "reason": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "task_graph": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["task_id", "task_type", "agent_id", "required_tags", "depends_on"],
+        "properties": {
+          "task_id": { "type": "string", "minLength": 1 },
+          "task_type": { "type": "string", "minLength": 1 },
+          "agent_id": { "type": ["string", "null"] },
+          "required_tags": { "type": "array", "items": { "type": "string" } },
+          "depends_on": { "type": "array", "items": { "type": "string" } },
+          "input": { "type": "object" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "mode": { "enum": ["A", "B", "C", null] },
+    "reference_targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "source", "rank"],
+        "properties": {
+          "type": { "enum": ["paper_claim", "repo_reported", "published_baseline", "internal_baseline"] },
+          "source": { "type": "string" },
+          "rank": { "type": "integer", "minimum": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "estimates": {
+      "type": "object",
+      "properties": {
+        "wall_min": { "type": "number", "minimum": 0 },
+        "tokens": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "capability_gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["task_id", "required_tags"],
+        "properties": {
+          "task_id": { "type": "string" },
+          "required_tags": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "diff": {
+      "type": "object",
+      "properties": {
+        "add_tasks": { "type": "array" },
+        "remove_tasks": { "type": "array", "items": { "type": "string" } },
+        "reorder": { "type": "array", "items": { "type": "string" } },
+        "activate": { "type": "array", "items": { "type": "string" } },
+        "deactivate": { "type": "array", "items": { "type": "string" } },
+        "targets_added": { "type": "array" },
+        "mode_change": { "enum": ["A", "B", "C", null] },
+        "budget_change": { "type": ["object", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "branch_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["branch_id", "decision", "decision_reason"],
+        "properties": {
+          "branch_id": { "type": "string" },
+          "decision": { "enum": ["expanded", "pruned"] },
+          "decision_reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "evolution": {
+      "type": "object",
+      "required": ["action", "proposed_agent", "evidence", "expected_effect"],
+      "properties": {
+        "action": { "enum": ["spawn", "refine", "merge", "retire", "restore"] },
+        "ladder_step": { "enum": ["reuse", "restore", "instantiate_template", "specialise", "fresh_spawn", null] },
+        "lineage": { "type": "string" },
+        "proposed_agent": {
+          "type": ["object", "null"],
+          "properties": {
+            "name": { "type": "string" },
+            "prompt": { "type": "string" },
+            "tools": { "type": "array", "items": { "type": "string" } },
+            "capability_tags": { "type": "array", "items": { "type": "string" } },
+            "model": { "enum": ["strong", "code", "fast"] }
+          }
+        },
+        "evidence": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "expected_effect": { "type": "string" }
+      }
+    },
+    "judgement": {
+      "type": "object",
+      "required": ["input_id", "kind", "reason"],
+      "properties": {
+        "input_id": { "type": "string" },
+        "kind": { "enum": ["paper", "question", "repo", "dataset", "note"] },
+        "reason": { "type": "string" }
+      }
+    },
+    "reason": { "type": "string" },
+    "signals": { "$ref": "#/$defs/signals" },
+    "suggested_next": { "type": ["string", "null"] }
+  },
+  "allOf": [
+    { "if": { "properties": { "kind": { "const": "plan" } } },
+      "then": { "required": ["activation", "task_graph", "mode", "reference_targets", "estimates"] } },
+    { "if": { "properties": { "kind": { "const": "replan" } } },
+      "then": { "required": ["diff", "reason"] } },
+    { "if": { "properties": { "kind": { "const": "evolution_draft" } } },
+      "then": { "required": ["evolution"] } },
+    { "if": { "properties": { "kind": { "const": "intake_judgement" } } },
+      "then": { "required": ["judgement"] } }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["signal", "evidence"],
+        "properties": {
+          "signal": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

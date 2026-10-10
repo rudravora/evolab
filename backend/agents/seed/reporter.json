@@ -1,0 +1,30 @@
+{
+  "agent": {
+    "id": "agt_reporter",
+    "name": "Reporter",
+    "role": "reporter",
+    "kind": "seed",
+    "status": "active",
+    "origin": "seed"
+  },
+  "version": {
+    "version": 1,
+    "model": "strong",
+    "tools": [
+      "read_ledger",
+      "write_note",
+      "finish"
+    ],
+    "capability_tags": [
+      "report:write"
+    ],
+    "system_prompt_file": "prompts/reporter.md",
+    "output_schema": "reporter.json",
+    "reason": "Seed version",
+    "parent_version_id": null
+  },
+  "evolvable": true,
+  "council_evaluated": true,
+  "counts_toward_active_cap": true,
+  "max_steps": 12
+}

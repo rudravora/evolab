@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "evolab/evaluator.json",
+  "title": "Evaluator output",
+  "description": "AGENTS.md section 4. Statistics are computed in code and passed in; the Evaluator writes the judgement. `outcome_scores` feed O_det for roles whose outcome depends on results.",
+  "type": "object",
+  "required": ["verdicts", "per_task", "seed_variance", "outcome_scores", "failure_origins", "signals"],
+  "properties": {
+    "verdicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["target", "verdict", "evidence"],
+        "properties": {
+          "target": { "type": "string" },
+          "target_type": { "enum": ["paper_claim", "repo_reported", "published_baseline", "internal_baseline"] },
+          "verdict": { "enum": ["reproduced", "partial", "not_reproduced", "baseline_established", "exploratory"] },
+          "evidence": { "type": "string", "minLength": 1 },
+          "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "per_task": { "type": "array" },
+    "seed_variance": { "type": "object" },
+    "outcome_scores": {
+      "type": "object",
+      "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+    },
+    "failure_origins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["task_id", "agent_id", "evidence"],
+        "properties": {
+          "task_id": { "type": "string" },
+          "agent_id": { "type": "string" },
+          "evidence": { "type": "string" }
+        }
+      }
+    },
+    "signals": { "$ref": "#/$defs/signals" },
+    "suggested_next": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["signal", "evidence"],
+        "properties": {
+          "signal": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

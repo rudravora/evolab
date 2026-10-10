@@ -1,0 +1,37 @@
+{
+  "agent": {
+    "id": "agt_meta_controller",
+    "name": "Meta-Controller",
+    "role": "meta_controller",
+    "kind": "core",
+    "status": "active",
+    "origin": "seed"
+  },
+  "version": {
+    "version": 1,
+    "model": "strong",
+    "tools": [
+      "read_memory",
+      "match_agents",
+      "search_agents",
+      "request_approval",
+      "replan",
+      "spawn_agent",
+      "get_budget",
+      "finish"
+    ],
+    "capability_tags": [
+      "plan",
+      "replan",
+      "evolve"
+    ],
+    "system_prompt_file": "prompts/meta_controller.md",
+    "output_schema": "meta_controller.json",
+    "reason": "Seed version",
+    "parent_version_id": null
+  },
+  "evolvable": false,
+  "council_evaluated": true,
+  "counts_toward_active_cap": true,
+  "max_steps": 12
+}

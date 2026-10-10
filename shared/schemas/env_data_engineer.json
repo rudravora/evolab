@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "evolab/env_data_engineer.json",
+  "title": "Environment and Data Engineer output",
+  "description": "AGENTS.md section 4. `dataset_profile` is null when no dataset is in scope.",
+  "type": "object",
+  "required": ["lockfile_path", "loader_path", "data_card", "dataset_profile", "signals"],
+  "properties": {
+    "lockfile_path": { "type": ["string", "null"] },
+    "loader_path": { "type": ["string", "null"] },
+    "data_card": { "type": "object" },
+    "dataset_profile": {
+      "type": ["object", "null"],
+      "required": ["rows", "columns", "target", "missing", "leakage_flags"],
+      "properties": {
+        "rows": { "type": "integer", "minimum": 0 },
+        "columns": { "type": "array", "items": { "type": "string" } },
+        "target": { "type": ["string", "null"] },
+        "missing": { "type": "object" },
+        "leakage_flags": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "signals": { "$ref": "#/$defs/signals" },
+    "suggested_next": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["signal", "evidence"],
+        "properties": {
+          "signal": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

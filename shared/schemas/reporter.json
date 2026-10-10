@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "evolab/reporter.json",
+  "title": "Reporter output",
+  "description": "AGENTS.md section 4. `findings` is used for exploratory runs.",
+  "type": "object",
+  "required": ["report_md", "why_differs", "findings", "signals"],
+  "properties": {
+    "report_md": { "type": "string", "minLength": 1 },
+    "why_differs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ledger_entry_id", "explanation"],
+        "properties": {
+          "ledger_entry_id": { "type": "string" },
+          "explanation": { "type": "string" },
+          "measured_effect": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["finding", "confidence"],
+        "properties": {
+          "finding": { "type": "string" },
+          "confidence": { "enum": ["low", "medium", "high"] },
+          "next_experiment": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "signals": { "$ref": "#/$defs/signals" },
+    "suggested_next": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["signal", "evidence"],
+        "properties": {
+          "signal": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

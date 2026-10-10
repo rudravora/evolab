@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "evolab/debugger.json",
+  "title": "Debugger output",
+  "description": "AGENTS.md section 4. `failure_origin_agent_id` names the agent whose output caused the failure (credit assignment).",
+  "type": "object",
+  "required": ["fixed", "fix", "lesson", "escalate", "signals"],
+  "properties": {
+    "fixed": { "type": "boolean" },
+    "fix": {
+      "type": ["object", "null"],
+      "properties": {
+        "kind": { "enum": ["diff", "command", "pin", "config"] },
+        "detail": { "type": "string" },
+        "rerun_job_id": { "type": ["string", "null"] }
+      }
+    },
+    "lesson": {
+      "type": ["object", "null"],
+      "properties": {
+        "error_class": { "type": "string" },
+        "libraries": { "type": "object" },
+        "summary": { "type": "string" },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "escalate": { "type": "boolean" },
+    "failure_origin_agent_id": { "type": ["string", "null"] },
+    "signals": { "$ref": "#/$defs/signals" },
+    "suggested_next": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["signal", "evidence"],
+        "properties": {
+          "signal": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}
