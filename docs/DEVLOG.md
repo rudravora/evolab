@@ -38,3 +38,10 @@ Team of 3 (decision D-023). The earlier role D was split across A, B and C; see 
 - Next: fill in names above; resolve Q-01 (names), Q-02 (LLM provider) and Q-04 (Voroa) first; then plan the 24-hour timeline against the three roles.
 - Blockers / gotchas: A carries the heaviest module; see the load-balancing note in COORDINATION.md section 10.
 - Touches contracts? No (API.md, ARCHITECTURE.md and AGENTS.md unchanged).
+
+### 2026-10-10 · planning session (Dev A, with Claude) · entry paths, planning model, spawning
+- Done: Requirement changed: a project can start from a paper, question, codebase or dataset, or any mix. Decided all four paths at full depth (paper first), mandatory exploratory mode on the question path, dynamic activation for combined inputs, hybrid plan-then-re-plan model, capability tags plus a five-step spawning ladder (domain agents as dormant templates, out of v1 build), datasets by URL/upload/worker path with no size cap for now, combined-input demo, and a revised work split. Recorded D-028 to D-037. Wrote WORKFLOW.md (step-by-step workflow with owners) and updated all docs to v0.3.
+- State: docs v0.3. No code yet. Role names still TBD except Dev A (author of these changes).
+- Next: team reviews v0.3; answer Q-18 (upload storage), Q-19 (demo datasets), Q-20 (template stubs), Q-22 (tag vocabulary) before M0; then the 24-hour timeline.
+- Blockers / gotchas: four full-depth paths raise scope sharply; the build order in PRD 6a (D-037) is the safety net. A's load grows (intake, activation, re-planning, tags, ladder) despite the offloads to B and C.
+- Touches contracts? Yes: API.md (intake, brief, activation, re-planning events, approvals), ARCHITECTURE.md (schema, flows), AGENTS.md (output schema, tags, verdicts, ladder). Contracts are not yet frozen (pre-M0).

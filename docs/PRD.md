@@ -1,10 +1,10 @@
 # PRD: EvoLab (working name)
 
-Version 0.1, 2026-10-10. Owner: team. Status: draft for team review.
+Version 0.3, 2026-10-10. Owner: team. Status: draft for team review. Step-by-step flow and owners: [WORKFLOW.md](WORKFLOW.md).
 
 ## 1. Summary
 
-EvoLab is a web-based research environment where a team of LLM agents turns a paper, question or idea into reproducible experiments, investigates what-if variations in parallel, explains differences from the published result, and improves itself over time. A researcher controls and understands everything through a dashboard (desktop and phone). Heavy computation runs on workers (first the researcher's laptop) that pull jobs from the backend.
+EvoLab is a web-based research environment where a team of LLM agents turns a paper, question, codebase or dataset (or any mix of them) into reproducible experiments, investigates what-if variations in parallel, explains differences from the published result, and improves itself over time. A researcher controls and understands everything through a dashboard (desktop and phone). Heavy computation runs on workers (first the researcher's laptop) that pull jobs from the backend.
 
 ## 2. Problem
 
@@ -13,17 +13,20 @@ ML research is spread across papers, code, datasets, notebooks, compute platform
 ## 3. Goals and non-goals
 
 **Goals**
-- G1. Autonomously reproduce the key result of one real paper on modest compute.
+- G1. Turn any of a paper, question, codebase or dataset into a reproducible investigation on modest compute; on the paper path, autonomously reproduce the paper's key result.
 - G2. Autonomously investigate at least one what-if extension, with explainable branch decisions.
 - G3. Explain where and why results differ from the paper, with evidence (ledger).
 - G4. Show a **visibly evolving** agent team driven by a reward loop (spawn, refine, merge, retire).
 - G5. Retain and reuse lessons across runs (measurable speed-up on a repeat-type run).
 - G6. Keep the researcher in control (inspect, approve, reject, redirect), including from a phone.
 - G7. Deploy publicly and pass UseShipReady's checks with a good score.
+- G8. Accept all four input types and any combination of them, at full depth.
+- G9. Decide which agents work from the inputs themselves (dynamic activation), re-plan when new facts arrive, and fill capability gaps through an explainable spawning ladder.
 
 **Non-goals**
 - Training or fine-tuning any model as part of "self-improvement".
-- Supporting arbitrary research domains perfectly. We demo one paper well.
+- Supporting arbitrary research domains perfectly. We demo one combined-input run well.
+- Building or testing domain-specific agents (materials, edge ML, CPU ML, 3D) in v1; they exist only as dormant templates (D-033).
 - Native mobile apps (responsive web only).
 - Multi-user collaboration beyond a shared project view.
 - Kaggle worker, full Mode B porting.
@@ -37,10 +40,10 @@ ML research is spread across papers, code, datasets, notebooks, compute platform
 
 | PS-03 requirement | Our feature | Priority |
 |---|---|---|
-| Accept paper, question, algorithm, dataset, codebase, idea | Intake screen (paper path complete, question path via "find candidate papers" step) | P0 / P1 |
+| Accept paper, question, algorithm, dataset, codebase, idea | Four-mode intake, Research Brief, all four entry paths at full depth, combined inputs | P0 |
 | Execute across local, Kaggle, Colab, remote | Pull-based worker; laptop first | P0 (laptop), P2 (Colab) |
 | Handle dependencies, data issues, errors, constraints, hyperparameters | Env/Data Engineer, Debugger, Executor budget scaling | P0 |
-| Meta-controller spawns/adapts agents | Meta-Controller with spawn/refine/merge/retire | P0 |
+| Meta-controller determines capabilities, spawns/adapts agents | Dynamic activation, hybrid re-planning, capability tags, resolution ladder, spawn/refine/merge/retire | P0 |
 | Reward loop (outcome, cost, feedback) | Reward formula and per-agent scoring | P0 |
 | Go beyond reproduction (diagnose, repair, compare, explain differences) | Evaluator, Ledger, Reporter | P0 |
 | What-if investigation of multiple possibilities | Experiment Designer and exploration tree | P0 |
@@ -55,7 +58,7 @@ ML research is spread across papers, code, datasets, notebooks, compute platform
 ## 6. Scope and priorities
 
 **P0 (must work in the demo)**
-1. Intake screen: goal text, paper link or PDF, optional repo, optional dataset, "Try the KAN vs MLP example".
+1. Four-mode intake screen: paper (link or PDF), question, codebase URL, dataset (URL, upload or worker path), notes, in any combination; "Try the example" loads the combined demo inputs.
 2. Worker pairing and job pull loop (laptop, started via one command).
 3. Agent loop with tool calling, suspension while jobs run, resume on result.
 4. Agents: Meta-Controller, Paper Analyst, Repo Auditor, Env and Data Engineer, Implementer (Mode A), Debugger, Experiment Designer, Evaluator, Reporter. Services: Executor, Ledger, Librarian.
@@ -66,10 +69,13 @@ ML research is spread across papers, code, datasets, notebooks, compute platform
 9. Deviation ledger and "why results differ" report section.
 10. Safety basics: workspace jail, command policy, timeouts, keys only on backend.
 11. Deployed to Voroa; UseShipReady scan run and findings addressed.
+12. All four entry paths at full depth: paper, codebase (audit first, inferred claim), dataset (profile, baseline suite), question (candidate pick plus mandatory exploratory branch).
+13. Research Brief with facts and typed reference targets; typed Evaluator verdicts.
+14. Dynamic activation for combined inputs; hybrid planning with re-planning triggers (minor auto-applied, major approved).
+15. Capability tags and the five-step resolution ladder with approval and probation.
 
 **P1 (should)**
 - n8n phone alerts and approve/reject buttons.
-- Question-only entry ("find candidate papers, you pick").
 - Agent detail page with version history and transcripts.
 - Notes panel and Markdown export.
 - Memory view.
@@ -77,46 +83,52 @@ ML research is spread across papers, code, datasets, notebooks, compute platform
 **P2 (stretch)**
 - Mode C clean-room KAN layer and dual-track comparison.
 - Colab worker.
-- Second small paper to demonstrate memory transfer (e.g., trees vs deep learning on tabular data).
-- Dataset-only and repo-only entries.
+- Domain template stubs (22 dormant specs across four domains), if Q-20 says yes.
+- Further domain-specific agents built and tested.
 
-### 6a. Capacity plan for a team of 3
+### 6a. Build order and safety net for a team of 3
 
-With three developers (A: backend, agents and deploy; B: worker, experiments and n8n; C: frontend, mocks and demo), not everything in P0 can be built at full depth. Build the **thin path through all of P0 first**, then deepen. If a gate slips, cut in this order (cut from the top first). Anything cut must be recorded in `logs/DECISIONS.md` and must not be presented as working in the demo.
+All four entry paths are P0 at full depth (D-028). Build the **thin path through all of P0 first**, then deepen, in this order. If a gate slips, the path or feature furthest down the list is reduced first; every reduction is recorded in `logs/DECISIONS.md` and is never presented as working (D-037).
 
-| Cut order | What to cut or simplify | Honest fallback |
+| Order | Build | If time runs short (honest fallback) |
 |---|---|---|
-| 1 | P2 items (Mode C, Colab, second paper, dataset-only and repo-only entry) | Not shown |
-| 2 | n8n phone approvals (FR-26, FR-27) | Phone approvals through the responsive dashboard only |
-| 3 | Notes panel, memory view, agent-detail diffs (parts of FR-21) | Show transcripts and version list only |
-| 4 | Question-only entry (P1) | Paper link entry only |
-| 5 | Repo Auditor as a live LLM agent | Lightweight audit: deterministic smoke test plus a stored audit for the demo repo, labelled as seeded |
-| 6 | Paper Analyst live extraction | Run live if possible, but keep a pre-extracted reproduction spec for the demo paper as a **labelled fallback** |
-| 7 | Merge and retire evolution actions | Spawn and refine only (these are the visible ones); document merge and retire as designed but not triggered |
+| 1 | Job pipe, intake, Brief, paper path end to end | Never reduced |
+| 2 | Hybrid re-planning, Debugger, memory, ledger, report | Never reduced |
+| 3 | Codebase path (audit first, inferred claim) | README-only claim extraction |
+| 4 | Dataset path (profile, baseline suite) | Baseline suite limited to two model families |
+| 5 | Question path (candidates plus exploratory branch) | Exploratory branch limited to two hypotheses |
+| 6 | Capability tags and the full ladder | Reuse, specialise and fresh spawn only; restore and template steps documented |
+| 7 | n8n phone approvals (FR-26, FR-27) | Phone approvals through the responsive dashboard only |
+| 8 | Notes panel, memory view, agent-detail diffs | Transcripts and version list only |
+| 9 | Merge and retire evolution actions | Spawn and refine only; merge and retire documented as designed |
+| 10 | P2 items (Mode C, Colab, domain template stubs) | Not shown |
 
-**Never cut:** the job pipe (worker pull), plan approval, the Debugger plus memory write and reuse, the exploration tree with decision reasons, the ledger, the report's "why we differ" section, rewards visible per agent, at least one visible spawn or refine, deployment, and the replay fallback.
+**Never reduced:** the job pipe, the Research Brief, plan approval, dynamic activation, re-planning triggers, the Debugger plus memory write and reuse, the exploration tree with decision reasons, the ledger, the report's "why we differ" section, rewards visible per agent, at least one visible spawn or specialise, deployment, and the labelled replay fallback.
 
-**Suggested agent build order** (A and B): Meta-Controller (simple task graph), Env and Data Engineer, Implementer (Mode A), Executor service, Debugger, Evaluator, Experiment Designer, Reporter, Librarian and Ledger services, then Paper Analyst and Repo Auditor depth. This gets a real baseline running before the less visible agents.
+**Suggested agent build order** (A and B): Meta-Controller (simple task graph), Env and Data Engineer, Implementer (Mode A), Executor service, Debugger, Evaluator, Experiment Designer, Reporter, Librarian and Ledger services, then Paper Analyst and Repo Auditor depth, then the codebase, dataset and question fragments.
 
 ## 7. Core user flow
 
-1. **Intake.** User enters goal "KAN vs MLP research" (or clicks the example), optionally adds a paper, repo, dataset or notes. A worker must be connected to execute; the intake shows the pairing command if none is online.
-2. **Plan.** The Meta-Controller builds a task graph. Paper Analyst extracts the reproduction spec. Repo Auditor audits official code and recommends a mode. The Designer drafts a CPU-sized experiment plan.
-3. **Approve.** The user approves, edits or rejects the plan (dashboard or phone).
-4. **Execute.** Env and Data Engineer set up the environment and data (jobs on the worker). Implementer patches code. Executor runs baseline experiments. Debugger handles failures, consulting memory.
-5. **Evaluate.** Evaluator compares results with the paper's claim across seeds and writes the verdict and reward signals.
-6. **Explore.** Designer proposes what-if branches. Branches run in parallel within budget. The Meta-Controller expands or prunes with recorded reasons. Risky or expensive steps ask for approval.
-7. **Report.** Reporter produces a Markdown report with results, the "why we differ" section built from the ledger, and links to commits.
-8. **Learn.** Rewards are computed, memory is updated, and the Meta-Controller proposes evolution actions, which the user approves.
+Full detail, with an owner for every step, is in [WORKFLOW.md](WORKFLOW.md).
+
+0. **Setup.** The researcher pairs a laptop worker with one command and sets the run budget.
+1. **Intake.** The researcher enters any mix of paper, question, codebase, dataset and notes (or clicks the example). Intake detects facts and links between inputs and writes the **Research Brief** with ranked reference targets.
+2. **Activation and plan.** Activation rules turn facts into required capabilities; the Meta-Controller adapts the agent list (with reasons), builds the task graph from per-input fragments, and estimates cost. Capability gaps go to the spawning ladder.
+3. **Approve.** The researcher approves, edits or rejects the plan (dashboard or phone); a question-only run also shows the candidate-paper picker.
+4. **Execute.** The orchestrator runs the graph in code; agents create jobs on the worker; the Debugger handles failures, consulting memory; every deviation goes to the ledger.
+5. **Re-plan on triggers.** New facts in `signals[]`, unresolved failures, branch results, researcher chat, budget thresholds or capability gaps call the Meta-Controller again; minor changes apply at once, major ones need approval.
+6. **Evaluate and explore.** The Evaluator gives a typed verdict per reference target; the Designer proposes what-if branches (and, on the question path, the exploratory hypotheses); the Meta-Controller expands or prunes with recorded reasons.
+7. **Report.** The Reporter writes results, verdicts and "why results differ" (or findings, for exploratory runs) from the ledger.
+8. **Learn.** Rewards are computed, verified lessons stored, and evolution proposals (spawn, refine, merge, retire) go to the researcher for approval, followed by probation.
 
 ## 8. Functional requirements
 
 IDs are referenced in commits, issues and the DEVLOG.
 
 **Intake and projects**
-- FR-1. Create a project with a goal and optional inputs (paper URL or PDF, repo URL, dataset upload or URL, notes).
+- FR-1. Create a project from any combination of inputs (at least one): paper URL or PDF, question, repo URL, dataset (URL, browser upload or worker path; no size cap for now), notes.
 - FR-2. Inputs are stored and treated as untrusted data. Repo links are recorded, never executed at intake.
-- FR-3. "Try the example" prefills the KAN vs MLP project.
+- FR-3. "Try the example" prefills the combined demo inputs (KAN paper, `pykan` repo, tabular dataset, question).
 - FR-4. If no worker is online, show the pairing command; planning may proceed, execution waits.
 
 **Workers**
@@ -160,6 +172,17 @@ IDs are referenced in commits, issues and the DEVLOG.
 - FR-30. Security headers, locked CORS, rate limits, input validation, no stack traces to clients.
 - FR-31. Append-only `events` table records commands, diffs, approvals and evolution actions.
 
+**Entry paths, activation and planning (v0.3)**
+- FR-32. Intake detects facts about each input and the links between them, and writes a Research Brief with typed, ranked reference targets.
+- FR-33. Question path: the Paper Analyst returns 3–5 candidate papers for a `candidate_selection` approval, and a mandatory exploratory branch runs alongside.
+- FR-34. Codebase path: the Repo Auditor runs first, infers the claim from the README, reported results or a linked paper, and activates the Paper Analyst if a paper is linked.
+- FR-35. Dataset path: the Env and Data Engineer profiles the data (size, columns, target, missing values, leakage flags); the Designer builds a baseline suite; published baselines are searched.
+- FR-36. Activation rules turn facts into required capabilities; the Meta-Controller adapts the list with written reasons; inactive agents are shown with the reason.
+- FR-37. Every agent output carries `signals[]` and an optional `suggested_next`; listed triggers call the Meta-Controller's `replan` mode; minor diffs auto-apply and major ones create a `plan` approval.
+- FR-38. The Evaluator returns a typed verdict per reference target: `reproduced`, `partial`, `not_reproduced`, `baseline_established`, `exploratory`.
+- FR-39. Agents and tasks carry capability tags; gaps are resolved by the ladder (reuse, restore, instantiate template, specialise, fresh spawn); steps 2–5 need an `evolution` approval and pass a 2-task probation.
+- FR-40. The registry supports `kind: template`, `status: dormant` entries for domain agents; none are built or tested in v1.
+
 ## 9. Non-functional requirements
 
 - **Budget:** the KAN vs MLP baseline fits in about 60 to 90 minutes of laptop CPU; what-ifs use reduced settings.
@@ -171,7 +194,7 @@ IDs are referenced in commits, issues and the DEVLOG.
 
 ## 10. Acceptance criteria for the demo path
 
-1. From the intake screen, "Try the example" starts a run and lands on the run page within 5 seconds.
+1. From the intake screen, "Try the example" starts the combined-input run and lands on the run page within 5 seconds.
 2. A plan appears for approval; approving it starts execution on the connected laptop worker.
 3. Baseline KAN vs MLP experiments complete with metrics for at least 2 tasks and 3 seeds each.
 4. At least one injected or natural failure is diagnosed and fixed by the Debugger, and a memory entry is written.
@@ -181,6 +204,10 @@ IDs are referenced in commits, issues and the DEVLOG.
 8. A second run (or a different what-if) shows measurable reuse of a learned memory entry (fewer failed attempts or less time).
 9. An approval is completed from a phone.
 10. The deployed app has a UseShipReady scan with no critical findings left open.
+11. Each of the four entry paths, started alone, produces an approved plan; the paper path and at least one other path complete a run end to end.
+12. In the combined run, the Brief shows at least two detected links between inputs, and the team view shows the activation list with reasons.
+13. At least one re-plan is triggered by a task's `signals[]` and appears on the plan timeline with its trigger and reason.
+14. At least one capability gap is resolved through the ladder with an approval card showing the gap, evidence, proposed spec and lineage, followed by probation.
 
 ## 11. Success metrics
 
@@ -193,6 +220,8 @@ IDs are referenced in commits, issues and the DEVLOG.
 | Branch decisions with recorded reasons | 100 percent |
 | Ledger entries cited in report | 3 or more |
 | UseShipReady critical findings | 0 |
+| Entry paths producing an approved plan | 4 of 4 |
+| Re-plans with recorded trigger and reason | 100 percent |
 
 ## 12. Risks and mitigations
 
@@ -208,6 +237,10 @@ IDs are referenced in commits, issues and the DEVLOG.
 | Sleep gaps with only 3 people | Nobody can fix the pipe at a critical moment | Staggered sleep plan in COORDINATION.md section 6; no one sleeps through the middle stretch alongside another owner of the pipe |
 | Network failure at venue | Live demo fails | Local-only mode (backend on localhost), recorded fallback |
 | Deployment issues late | Lose UseShipReady score | Deploy in the first hours, scan early |
+| Four full-depth entry paths on a 3-person team | Later paths unfinished | Build order and recorded reductions (section 6a, D-037); shared fragments and agents across paths |
+| No upload size cap | Large uploads fail or exhaust Voroa bandwidth | Prefer URL or worker path for large files; relay uploads to the worker (Q-18) |
+| Re-planning loops or churn | Budget burned on planning | Re-plan only on listed triggers; minor/major threshold; budget threshold trigger |
+| Spawned agents underperform | Worse results, judges unconvinced | Approval with evidence, 2-task probation, automatic retire or rollback |
 
 ## 13. Milestones (draft; the full timeline is planned separately)
 
@@ -215,9 +248,9 @@ IDs are referenced in commits, issues and the DEVLOG.
 |---|---|
 | M0 Contracts frozen | API.md, schema, agent I/O contracts agreed; mock server running |
 | M1 Pipe works | Dashboard creates a run, a fake agent creates a job, the laptop worker runs it, the result shows live |
-| M2 Real agents | Paper Analyst through Executor produce a real baseline experiment |
+| M2 Real agents | Paper path: Paper Analyst through Executor produce a real baseline experiment |
 | M3 Full loop | Debugger, branches, evaluation, ledger, report |
-| M4 Evolution and memory | Rewards, spawn/refine visible, memory reuse proven |
+| M4 Evolution and memory | Rewards, ladder and spawn/specialise/refine visible, memory reuse proven; all four entry paths plan successfully |
 | M5 Hardening | Deployed on Voroa, UseShipReady fixes, demo rehearsed, fallback recorded |
 
 ## 14. Open questions

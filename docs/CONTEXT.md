@@ -1,6 +1,6 @@
 # CONTEXT
 
-Everything a new teammate needs to understand the project in ten minutes.
+Version 0.3. Everything a new teammate needs to understand the project in ten minutes. For the step-by-step flow and who owns each step, read [WORKFLOW.md](WORKFLOW.md).
 
 ## 1. The hackathon
 
@@ -11,7 +11,7 @@ Everything a new teammate needs to understand the project in ten minutes.
 
 ## 2. The problem in one paragraph
 
-Build a research environment run by a **dynamic team of AI agents** that supports the whole ML research lifecycle. Given a paper, question, algorithm, dataset, codebase or idea, it sets up the environment, gets the data, implements or patches the code, runs experiments on modest compute (laptop CPU, free Colab or Kaggle), debugs failures, investigates "what if?" variations, compares against the paper, and explains differences. A **meta-controller** decides which capabilities each task needs and **spawns, refines, merges or retires agents** using a **reward loop** (research outcome, compute cost, researcher feedback). What it learns is retained and reused. The researcher can inspect, approve, reject and redirect everything, including from a phone. The **interface** (what agents are doing, why, how well, how the team is evolving) is a major part of the challenge, and it must not collapse into a notebook or chat box.
+Build a research environment run by a **dynamic team of AI agents** that supports the whole ML research lifecycle. Given a paper, question, algorithm, dataset, codebase or idea (**any one of them, or any mix**), it sets up the environment, gets the data, implements or patches the code, runs experiments on modest compute (laptop CPU, free Colab or Kaggle), debugs failures, investigates "what if?" variations, compares against the paper, and explains differences. A **meta-controller** decides which capabilities each task needs and **spawns, refines, merges or retires agents** using a **reward loop** (research outcome, compute cost, researcher feedback). What it learns is retained and reused. The researcher can inspect, approve, reject and redirect everything, including from a phone. The **interface** (what agents are doing, why, how well, how the team is evolving) is a major part of the challenge, and it must not collapse into a notebook or chat box.
 
 ## 3. What judges will look for (minimum deliverable)
 
@@ -21,7 +21,7 @@ Build a research environment run by a **dynamic team of AI agents** that support
 4. **Explains where and why** our results differ from the paper.
 5. Shows a dashboard of the **evolving agent team**.
 
-Plus: meta-controller with spawn/adapt, reward loop, memory that makes future runs better, researcher control (including mobile), execution across environments.
+Plus: any of paper, question, codebase or dataset as the starting point; meta-controller with spawn/adapt, reward loop, memory that makes future runs better, researcher control (including mobile), execution across environments.
 
 ## 4. Our solution in one picture
 
@@ -43,7 +43,11 @@ Plus: meta-controller with spawn/adapt, reward loop, memory that makes future ru
 
 Key idea: **agents think in the backend (LLM API calls), workers do in the field (run commands).** The backend never connects to the laptop; the laptop polls outward, so it works behind any router.
 
-## 5. Demo paper (locked)
+## 5. Demo (locked)
+
+The demo is **one combined-input run** (D-035): the KAN paper, the official `pykan` repository, one small real tabular dataset (choice pending, Q-19), and the question *"Do KANs beat parameter-matched MLPs on real tabular data?"* A short second run on another tabular dataset shows memory reuse. The walkthrough is in WORKFLOW.md.
+
+### Demo paper
 
 **Liu et al., "KAN: Kolmogorov-Arnold Networks" (2024)**, with the official `pykan` library.
 
@@ -64,6 +68,12 @@ Key idea: **agents think in the backend (LLM API calls), workers do in the field
 | Memory | SQLite with FTS5, optional small embeddings, entries labelled `seeded` vs `learned` |
 | Safety | Workspace jail, command policy, approvals, keys only on the backend |
 | Scope | Mode A (patch official code) fully; Mode C (clean-room) for the core KAN layer only, as a stretch |
+| Entry paths | Paper, question, codebase and dataset, all at full depth; built in that order: paper, codebase, dataset, question (D-028) |
+| Question path | Candidate papers for the researcher to pick, plus a mandatory exploratory branch (D-030) |
+| Combined inputs | Dynamic activation: facts detected, rules pick capabilities, Meta-Controller adapts (D-031) |
+| Planning model | Hybrid: plan up front, execute in code, re-plan only on triggers (D-032) |
+| Spawning | Capability tags plus a five-step ladder (reuse, restore, template, specialise, spawn); domain agents dormant, out of v1 (D-033) |
+| Datasets | URL, browser upload or worker path; no size cap for now (D-034) |
 
 ## 7. Vocabulary
 
@@ -82,14 +92,25 @@ Key idea: **agents think in the backend (LLM API calls), workers do in the field
 | **Ledger** | Append-only list of every deviation from the paper or official code, tagged by category |
 | **Mode A / B / C** | A: minimal patches to official code. B: port or re-implement the core. C: clean-room version alongside official code (dual-track) |
 | **Approval** | A human gate (plan, expensive run, risky command, agent evolution) |
-| **Memory entry** | A stored lesson (error to fix, config to outcome, audit, gotcha) |
+| **Memory entry** | A stored lesson (error to fix, config to outcome, audit, gotcha, dataset profile) |
+| **Entry type** | Which kind of input started the run: `paper`, `question`, `repo`, `dataset`; a run can have several |
+| **Research Brief** | The normalised record built at intake: inputs, detected facts, reference targets (`runs.brief_json`) |
+| **Fact** | Something intake detects about the inputs, e.g. "repo links paper", "dataset not in paper" |
+| **Reference target** | What results are compared against: paper claim, repo-reported numbers, published baselines, or internal baselines |
+| **Activation** | The list of agents switched on for a run, each with a reason (`runs.activation_json`) |
+| **Fragment** | The sub-graph of tasks one entry type contributes to the plan |
+| **Signals** | Facts an agent reports in its output (`signals[]`) that can trigger re-planning |
+| **Capability tag** | A label on agents and tasks (`repo:audit`, `lib:pykan`) used to match work to agents and detect gaps |
+| **Template** | A dormant agent spec (`kind: template`) that can be instantiated when its tags match a gap |
+| **Probation** | The first 2 tasks of a new or refined agent, compared against the agent it replaces |
+| **Exploratory mode** | Question-path branch that turns the question into testable hypotheses and runs them without a paper |
 
 ## 8. Sponsors and how we use them
 
 | Sponsor | What we know | Our use |
 |---|---|---|
 | **UseShipReady** | Scans a deployed app for security, reliability and launch blockers and gives a readiness report. The event page says it provides production-readiness scoring for this hackathon. | Deploy early, scan early and often, fix findings. Treat the score as part of judging. |
-| **Voroa** | Dashboard for deploying from GitHub and managing apps, logs and deploys. `VERIFY` free-tier limits, persistent storage, supported stacks. | Host the backend and dashboard. Not for training. |
+| **Voroa** | Deploys from GitHub to a live URL, hosted in Mumbai. Web services, background workers, cron jobs, managed Postgres and Redis-compatible key-value; WebSockets supported; free tier with up to 15 services, 5 GB bandwidth and 500 build minutes a month. `VERIFY` instance sizes and whether disk is persistent. | Host the backend and dashboard; Postgres for state. Not for training. |
 | **n8n** | Workflow automation (webhooks, triggers, app integrations). | Phone alerts and approvals, paper discovery, report sync. **Not** the core agent logic. |
 
 ## 9. Assumptions to confirm
@@ -99,3 +120,5 @@ Key idea: **agents think in the backend (LLM API calls), workers do in the field
 - Voroa persistent storage and environment-variable support
 - Whether organizers provide LLM credits or compute
 - Exact `pykan` version and the paper's exact function definitions
+- Demo tabular datasets (Q-19) and the capability tag vocabulary (Q-22)
+- Where large uploads are stored with no size cap (Q-18)

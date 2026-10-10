@@ -1,6 +1,6 @@
 # API
 
-Version 0.1. Base path: `/api/v1`. JSON everywhere unless noted. This file is the **contract between frontend, backend and worker**; change it by PR and tell the others (see COORDINATION.md). A machine-readable `shared/openapi.yaml` should be generated from the backend and committed.
+Version 0.3. Base path: `/api/v1`. JSON everywhere unless noted. This file is the **contract between frontend, backend and worker**; change it by PR and tell the others (see COORDINATION.md). A machine-readable `shared/openapi.yaml` should be generated from the backend and committed.
 
 ## 1. Conventions
 
@@ -23,10 +23,17 @@ Version 0.1. Base path: `/api/v1`. JSON everywhere unless noted. This file is th
   - agent task: `queued`, `running`, `waiting_for_job`, `waiting_for_approval`, `done`, `failed`, `cancelled`
   - branch: `proposed`, `awaiting_approval`, `queued`, `running`, `done`, `expanded`, `pruned`, `killed`
   - approval: `pending`, `approved`, `rejected`, `edited`, `expired`
-  - agent: `active`, `inactive`, `retired`; kind: `core`, `seed`, `spawned`
+  - agent: `active`, `inactive`, `retired`, `dormant`; kind: `core`, `seed`, `spawned`, `template`
   - worker: `online`, `offline`
   - ledger category: `compute_adaptation`, `dependency_fix`, `bug_fix`, `hyperparameter_change`, `fidelity_deviation`
-  - memory kind: `error_fix`, `config_outcome`, `audit`, `gotcha`, `lesson`; source: `seeded`, `learned`
+  - memory kind: `error_fix`, `config_outcome`, `audit`, `gotcha`, `lesson`, `dataset_profile`; source: `seeded`, `learned`
+  - entry type: `paper`, `question`, `repo`, `dataset`
+  - input kind: `paper`, `question`, `repo`, `dataset`, `note`; input source: `url`, `upload`, `worker_path`, `text`
+  - approval type: `plan`, `expensive_run`, `risky_command`, `new_package`, `evolution`, `branch_expand`, `human_input`, `candidate_selection`
+  - reference target type: `paper_claim`, `repo_reported`, `published_baseline`, `internal_baseline`
+  - verdict: `reproduced`, `partial`, `not_reproduced`, `baseline_established`, `exploratory`
+  - plan revision kind: `initial`, `minor`, `major`
+  - ladder step: `reuse`, `restore`, `instantiate_template`, `specialise`, `fresh_spawn`
 
 ## 2. Health
 
@@ -37,32 +44,35 @@ Version 0.1. Base path: `/api/v1`. JSON everywhere unless noted. This file is th
 ## 3. Projects and runs (dashboard)
 
 ### POST `/projects`
-Create a project and start its first run in one call (intake).
+Create a project and start its first run in one call (intake). Any combination of inputs is accepted (D-031).
 ```json
-// request
+// request (the combined demo)
 {
-  "goal": "KAN vs MLP research",
+  "goal": "Do KANs beat parameter-matched MLPs on real tabular data?",
   "inputs": [
-    { "kind": "paper", "ref": "https://arxiv.org/abs/2404.19756" },
-    { "kind": "repo",  "ref": "https://github.com/KindXiaoming/pykan" },
-    { "kind": "note",  "ref": "Focus on small scientific functions" }
+    { "kind": "paper",    "source": "url",  "ref": "https://arxiv.org/abs/2404.19756" },
+    { "kind": "repo",     "source": "url",  "ref": "https://github.com/KindXiaoming/pykan" },
+    { "kind": "dataset",  "source": "url",  "ref": "https://example.org/tabular.csv" },
+    { "kind": "question", "source": "text", "ref": "Do KANs beat parameter-matched MLPs on real tabular data?" }
   ],
   "budget": { "max_wall_min": 90, "max_tokens": 1500000 },
   "approval_policy": { "expensive_runs": true, "new_packages": true },
   "example": false
 }
 // response 201
-{ "project_id": "proj_...", "run_id": "run_...", "status": "planning", "worker_online": true }
+{ "project_id": "proj_...", "run_id": "run_...", "status": "planning",
+  "entry_types": ["paper", "repo", "dataset", "question"], "worker_online": true }
 ```
-- `example: true` ignores other fields and creates the KAN vs MLP example.
-- Dataset files: `POST /projects/{id}/inputs` (multipart) after creation, or pass a URL as `kind: "dataset"`.
-- Validation: `goal` required (1 to 2000 chars); `ref` for `paper`/`repo`/`dataset` must be an http(s) URL; URLs are never fetched synchronously.
+- `example: true` ignores other fields and creates the combined demo inputs.
+- Validation: at least one input, or a `goal` that is a question (it becomes a `question` input). `goal` 1 to 2000 chars when given. `ref` for `paper`/`repo`/`dataset` with `source: "url"` must be an http(s) URL; URLs are never fetched synchronously.
+- Datasets: `source: "url"`; `source: "upload"` via `POST /projects/{id}/inputs` (multipart) after creation; or `source: "worker_path"` with `ref` = a path inside an allowlisted folder on the worker (the file never leaves the laptop). **No size cap for now** (D-034); see Q-18 for storage.
+- Intake runs facts detection in the background and emits `intake.brief` when the Research Brief is ready.
 
 ### GET `/projects` , GET `/projects/{project_id}`
 Lists and details, including latest run summary.
 
 ### POST `/projects/{project_id}/inputs`
-Add an input mid-run. Multipart for files (size cap enforced; type allowlist: `.pdf .csv .tsv .json .txt .md .zip` `VERIFY`). Returns the `input`. The Meta-Controller is notified and may create work.
+Add an input mid-run. Multipart for files (no size cap for now, D-034; type allowlist: `.pdf .csv .tsv .json .parquet .txt .md .zip` `VERIFY`). Returns the `input`. Adding an input is a re-planning trigger: facts are re-detected and the Meta-Controller may revise the plan.
 
 ### POST `/projects/{project_id}/runs`
 Start a new run in an existing project. Body: `{ "goal": "...", "budget": {...} }`.
@@ -77,6 +87,31 @@ Start a new run in an existing project. Body: `{ "goal": "...", "budget": {...} 
   "started_at": "...", "ended_at": null
 }
 ```
+
+### GET `/runs/{run_id}/brief`
+```json
+{
+  "entry_types": ["paper", "repo", "dataset", "question"],
+  "goal": "Do KANs beat parameter-matched MLPs on real tabular data?",
+  "domain": "cpu-ml",
+  "facts": [
+    { "fact": "repo_links_paper", "evidence": "README cites arXiv 2404.19756" },
+    { "fact": "dataset_not_in_paper", "evidence": "dataset name absent from paper text" },
+    { "fact": "question_about_paper", "evidence": "question names KAN and MLP" }
+  ],
+  "reference_targets": [
+    { "type": "paper_claim", "source": "inp_paper", "rank": 1 },
+    { "type": "repo_reported", "source": "inp_repo", "rank": 2 }
+  ],
+  "activation": [
+    { "agent_id": "agt_paper", "active": true, "reason": "paper supplied" },
+    { "agent_id": "agt_scout_mode", "active": false, "reason": "not required: paper supplied" }
+  ]
+}
+```
+
+### GET `/runs/{run_id}/plan` , GET `/runs/{run_id}/plan/revisions`
+Current task graph (tasks, owners, dependencies, `required_tags`) and the revision history: `{ "version", "trigger", "kind": "initial|minor|major", "diff", "reason", "approval_id" }`.
 
 ### POST `/runs/{run_id}/pause` , `/resume` , `/cancel`
 `pause` stops creating new jobs and suspends agent loops at the next step; running jobs finish. `cancel` also cancels jobs. Returns the run. `invalid_state` if the transition is illegal.
@@ -102,7 +137,7 @@ Chat history.
 | `run.status` | `{ "status": "running" }` |
 | `agent.task` | `{ "task_id", "agent_id", "agent_name", "status", "summary" }` |
 | `agent.message` | `{ "task_id", "seq", "role", "content" }` (truncate large content; fetch full via transcript route) |
-| `agent.evolution` | `{ "action": "spawn\|refine\|merge\|retire", "agent_id", "version", "reason" }` |
+| `agent.evolution` | `{ "action": "spawn\|refine\|merge\|retire\|restore", "ladder_step", "origin", "agent_id", "version", "reason" }` |
 | `agent.score` | `{ "agent_id", "task_id", "reward", "outcome", "cost", "feedback" }` |
 | `job.status` | `{ "job_id", "status", "worker_id" }` |
 | `job.log` | `{ "job_id", "seq", "stream", "chunk" }` |
@@ -116,12 +151,17 @@ Chat history.
 | `chat.message` | `{ "id", "role", "content" }` |
 | `report.ready` | `{ "artifact_id" }` |
 | `budget.warning` | `{ "metric", "used", "limit" }` |
+| `intake.brief` | `{ "entry_types", "facts_count", "reference_targets" }` (full Brief via `GET /runs/{id}/brief`) |
+| `agent.activation` | `{ "agent_id", "active", "reason" }` |
+| `plan.revised` | `{ "version", "trigger", "kind", "reason", "approval_id" }` |
+| `candidates.ready` | `{ "approval_id", "count" }` |
+| `capability.gap` | `{ "task_id", "required_tags", "source": "planning\|runtime\|researcher" }` |
 
 ## 6. Agents, tasks, transcripts
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/agents` | All agents with current version, kind, status, rolling reward |
+| GET | `/agents` | All agents with current version, kind, status, origin, capability tags, rolling reward. `?kind=template` lists dormant templates |
 | GET | `/agents/{agent_id}` | Detail |
 | GET | `/agents/{agent_id}/versions` | Version timeline with `reason` and `parent_version_id` |
 | GET | `/agents/{agent_id}/versions/{version}` | Prompt and tools (diff against parent available via `?diff=1`) |
@@ -129,7 +169,7 @@ Chat history.
 | GET | `/tasks/{task_id}` | Task detail including output and reward breakdown |
 | GET | `/tasks/{task_id}/messages` | Full transcript (the "why") |
 | POST | `/tasks/{task_id}/feedback` | `{ "value": "up\|down" }` |
-| GET | `/runs/{run_id}/agent-graph` | Nodes and edges (spawned-from, merged-into) for the team view |
+| GET | `/runs/{run_id}/agent-graph` | Nodes and edges (spawned-from, specialised-from, instantiated-from, merged-into) plus each node's activation state and reason, for the team view |
 
 ## 7. Experiments
 
@@ -177,6 +217,17 @@ Payloads by type (examples):
 // type: evolution
 { "action": "spawn", "proposed_agent": { "name": "KAN API Specialist", "prompt": "...", "tools": [...] },
   "evidence": ["Debugger failed 2x on pykan API errors"], "expected_effect": "Fewer failed attempts" }
+// type: plan (a major re-plan carries a diff instead of a full plan)
+{ "summary": "Add tabular baseline suite and activate a new agent", "trigger": "capability_gap",
+  "diff": { "add_tasks": [...], "activate": ["agt_..."], "targets_added": [] } }
+// type: candidate_selection
+{ "summary": "Pick a paper for: Do KANs beat MLPs on tabular data?",
+  "candidates": [ { "title": "...", "url": "https://arxiv.org/abs/...", "why": "..." } ] }
+// type: evolution (ladder)
+{ "action": "spawn", "ladder_step": "fresh_spawn", "gap": { "required_tags": ["bench:tabular-protocol"] },
+  "proposed_agent": { "name": "Tabular Benchmark Protocol", "prompt": "...", "tools": [...], "capability_tags": [...] },
+  "lineage": "fresh", "evidence": ["No active agent or template covers bench:tabular-protocol"],
+  "expected_effect": "Fair, reproducible tabular baselines", "probation_tasks": 2 }
 // type: risky_command
 { "command": "pip install pykan==0.2.8", "reason": "Required by official repo", "risk": "high" }
 ```
@@ -212,6 +263,8 @@ Atomic claim. `204` if nothing; otherwise `200`:
   "timeout_s": 900, "max_output_bytes": 5000000
 }
 ```
+Uploaded datasets are relayed to the worker as a `download` job from a short-lived signed backend URL and then removed from the backend (Q-18). `worker_path` datasets are read in place.
+
 `type` values: `shell` (argv, never a shell string), `python_script`, `pip_install` (`{ "packages": ["pykan==0.2.8"] }`), `write_file` (`{ "path", "content" or "artifact_id" }`), `read_file`, `list_dir`, `git` (`{ "op": "init|commit|diff", "args": {...} }`), `download` (`{ "url", "dest", "sha256?" }`).
 
 ### POST `/worker/jobs/{job_id}/start`

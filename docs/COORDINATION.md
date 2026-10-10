@@ -1,6 +1,6 @@
 # COORDINATION
 
-Version 0.2 (team of 3: two backend-side devs and one frontend dev). How three people build one system in about 24 hours without blocking each other. Names go in `logs/DEVLOG.md`.
+Version 0.3 (team of 3: two backend-side devs and one frontend dev; four entry paths, see [WORKFLOW.md](WORKFLOW.md) for who owns each step). How three people build one system in about 24 hours without blocking each other. Names go in `logs/DEVLOG.md`.
 
 ## 1. The six rules
 
@@ -17,9 +17,9 @@ The earlier four-role plan had a separate integration and demo role (D). With th
 
 | Role | Owns | Primary files |
 |---|---|---|
-| **A: Backend, agents, deploy** | FastAPI app, orchestrator, agent runtime, LLM wrapper, Evolution engine, Librarian, Ledger, approvals, SSE; **plus** Voroa deploy, security hardening, UseShipReady scans and fixes, `.env.example` | `backend/`, deploy config, `docs/AGENTS.md` |
-| **B: Worker, experiments, n8n** | `worker.py`, policy and jail, the KAN vs MLP experiment code, cached baseline results, seeded memory, dry runs, fake worker; **plus** n8n flows (phone approvals, alerts) after M2 | `worker/`, `experiments/`, `scripts/fake_worker.py` |
-| **C: Frontend, mocks, demo** | All screens, SSE client, charts, tree, mobile layout, mock server and example JSON; **plus** demo script, fallback replay mode and recording, DEVLOG and docs hygiene | `frontend/`, `shared/examples/`, `scripts/mock_server.py` |
+| **A: Backend, agents, deploy** | FastAPI app, intake and facts detection, Research Brief, activation rules and fragments, orchestrator with re-planning triggers, agent runtime, LLM wrapper, capability tags and the resolution ladder, Evolution engine, Librarian, Ledger, approvals, SSE; **plus** Voroa deploy, security hardening, UseShipReady scans and fixes, `.env.example` | `backend/`, deploy config, `docs/AGENTS.md` |
+| **B: Worker, experiments, n8n** | `worker.py`, policy and jail, the KAN vs MLP experiment code, cached baseline results, seeded memory, dry runs, fake worker; **dataset profiling script, repo-only smoke-test harness, exploratory and baseline-suite experiment scripts, demo tabular datasets, reproducible `pykan` drift** (D-036); **plus** n8n flows (phone approvals, alerts) after M2 | `worker/`, `experiments/`, `scripts/fake_worker.py` |
+| **C: Frontend, mocks, demo** | All screens including the **four-mode intake, Brief view, candidate picker, activation view and plan timeline** (D-036), SSE client, charts, tree, mobile layout, mock server and example JSON (one example per entry type); **plus** demo script, fallback replay mode and recording, DEVLOG and docs hygiene | `frontend/`, `shared/examples/`, `scripts/mock_server.py` |
 
 **Who verifies what** (replaces the old role D): A verifies M0 and M1 and runs the deploy and UseShipReady scans; B verifies M2; C runs the demo rehearsals; everyone verifies M3 and M4 together.
 
@@ -41,9 +41,10 @@ Everyone owns the **tests of their own module**, and everyone must be able to st
 
 | Contract | Source of truth | Mock | Mock owner |
 |---|---|---|---|
-| HTTP API | `docs/API.md` and `shared/openapi.yaml` | `scripts/mock_server.py` serving `shared/examples/*.json` | C |
+| HTTP API | `docs/API.md` and `shared/openapi.yaml` | `scripts/mock_server.py` serving `shared/examples/*.json`, including one intake response and one Brief per entry type plus the combined demo | C |
 | SSE events | API.md section 5 | `scripts/mock_sse.py` replays a recorded event stream | C |
-| Agent I/O | `shared/schemas/<role>.json` | Canned outputs in `shared/examples/agents/` | A |
+| Agent I/O | `shared/schemas/<role>.json` (all include `signals[]`) | Canned outputs in `shared/examples/agents/` | A |
+| Activation rules and tag vocabulary | AGENTS.md sections 1a and 4a | `shared/examples/activation/*.json` | A |
 | Worker jobs | API.md section 9 | `scripts/fake_worker.py` (accepts jobs, returns canned logs and results) | B |
 | DB schema | ARCHITECTURE.md section 4 and migrations | `scripts/seed_db.py` for demo data | A |
 
@@ -57,9 +58,9 @@ Everyone stops and integrates at these gates. If a gate slips, cut scope with th
 |---|---|---|
 | **M0 Contracts frozen** | API, schema and agent I/O agreed; mock server and fake worker run | A |
 | **M1 Pipe works** | Dashboard creates a run, a fake agent creates a job, the laptop worker runs a command, the live log appears in the UI | A (with B and C) |
-| **M2 Real agents** | Paper Analyst through Executor produce a real baseline experiment on the laptop | B |
+| **M2 Real agents** | Paper path: Paper Analyst through Executor produce a real baseline experiment on the laptop; Brief and activation work for the combined demo inputs | B |
 | **M3 Full loop** | Failure, Debugger fix, branches, evaluation, ledger, report | All three |
-| **M4 Evolution and memory** | Rewards visible, spawn or refine visible, memory reuse proven | All three |
+| **M4 Evolution and memory** | Rewards visible, a ladder walk with approval and probation visible, memory reuse proven; all four entry paths produce an approved plan | All three |
 | **M5 Hardening** | Deployed on Voroa, UseShipReady findings fixed, rehearsed twice, fallback recorded | A (deploy), C (rehearsal) |
 
 Exact clock times come from the 24-hour timeline (not planned yet). Rule of thumb: M1 by hour 6 to 8, and **deploy to Voroa by hour 6** even if the app is ugly.
@@ -105,7 +106,8 @@ The DEVLOG entry template is at the top of that file. Keep entries short and fac
 - **Pin versions (all):** `requirements.lock` for backend, worker and experiments. A broken `pip install` at 3 AM is the most likely killer.
 - **Rate limits (A):** monitor LLM usage; agree on a cap per run and a fallback provider.
 - **Scope police:** after M2, anything not on the P0 list needs a unanimous yes. Use the cut ladder, in order.
-- **Load balancing:** A carries the heaviest module (agents, evolution, memory, deploy). B should pick up the Librarian's retrieval code or the Ledger service once the worker is stable, and C should take over the approvals UI and SSE contract tests early so A does not carry them.
+- **Four full-depth entry paths:** follow the build order in PRD section 6a (D-037); at every sync, check which path is next and record any reduction in DECISIONS.
+- **Load balancing:** A carries the heaviest module (intake, activation, re-planning, agents, evolution, memory, deploy). B should pick up the Librarian's retrieval code or the Ledger service once the worker is stable, and C should take over the approvals UI and SSE contract tests early so A does not carry them.
 
 ## 11. Pre-kickoff checklist
 
@@ -117,7 +119,9 @@ The DEVLOG entry template is at the top of that file. Keep entries short and fac
 - [ ] n8n workspace created; webhook URL and signing secret agreed (can wait until after M2)
 - [ ] `pykan` version pinned and a 5-minute smoke test run on at least two laptops
 - [ ] Organizers asked: credits, Wi-Fi, power, internet restrictions, exact times
-- [ ] Mock server, fake worker and `shared/examples/` skeletons committed
+- [ ] Mock server, fake worker and `shared/examples/` skeletons committed (one per entry type plus the combined demo)
+- [ ] Capability tag vocabulary frozen (Q-22) and demo tabular datasets chosen (Q-19)
+- [ ] Decision on upload storage with no size cap (Q-18)
 
 ## 12. Mid-event pitfalls to watch for
 
@@ -127,3 +131,5 @@ The DEVLOG entry template is at the top of that file. Keep entries short and fac
 - Nobody tests the failure path: schedule one deliberate failure (bad version) and watch the Debugger, memory and evolution events fire.
 - Last-hour feature creep: freeze features at a fixed time and spend the rest on rehearsal and the fallback.
 - One person becoming the only one who understands the agent loop: pair early and keep the agent loop file small and commented.
+- Re-planning churn: if the plan timeline shows repeated revisions with no progress, tighten the triggers rather than adding LLM calls.
+- Testing only the paper path: run each entry path alone at least once before M4.

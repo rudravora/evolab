@@ -17,12 +17,15 @@ Unresolved items. Each has an owner (role A, B or C, see COORDINATION.md) and a 
 | Q-09 | Which OS do the three team laptops run? | Resource limits and process-group kill differ on Windows | B | M0 | Affects worker implementation |
 | Q-10 | Embeddings for memory: use or skip in v1? | Time vs value | A | M2 | Keyword search plus exact signatures may be enough; lean to skip with only 3 devs |
 | Q-11 | Auto-approve mode for the demo? | Smooth demo vs showing the approval flow | Team | M4 | Suggest: manual approvals on stage, with the phone approval moment if n8n survives the cut ladder |
-| Q-12 | Second small paper to prove memory transfer? | Strengthens self-improvement story | Team | M3 | P2 and first on the cut ladder |
-| Q-13 | Where do uploaded dataset files live in deployment (Voroa disk may be ephemeral)? | Data intake | A | M2 | May store on the worker side only |
 | Q-14 | Submission requirements: PPT or deck for Unstop, repo link, demo video? | Deliverables | C | Before round | Not yet planned |
 | Q-15 | Repo name, license, and public vs private | Voroa deploys from GitHub | A | Kickoff | |
 | Q-16 | Final product name (EvoLab is a placeholder) | Branding in UI and deck | Team | Before M5 | |
 | Q-17 | Who presents the demo, and who rehearses fallback replays? | Demo reliability | C | M4 | |
+| Q-18 | With no upload size cap (D-034), where do large browser uploads live? Voroa disk may be ephemeral and the free tier includes 5 GB bandwidth | Uploads could fail or exhaust bandwidth | A | M2 | Suggest: large files by URL or worker path; browser uploads relayed to the worker, then deleted from the backend |
+| Q-19 | Which small tabular dataset for the combined demo (licence, size, a known KAN or MLP baseline)? Plus a second one for the memory-reuse run | Demo content | B | M2 | Must be CPU-friendly and public |
+| Q-20 | Ship the 22 domain template stubs in v1 (about an hour), or leave the template library empty? | Ladder step 3 visibility vs scope | Team | M4 | Empty library keeps the tabular gap a genuine fresh spawn |
+| Q-21 | Scope checkpoint: if the paper path is not end to end by M2, which later path is reduced first? | Four full-depth paths on a 3-person team | Team | M2 | Default order of reduction: question, then dataset (D-037) |
+| Q-22 | Capability tag vocabulary: the fixed list of tags agents and tasks may use | Matching, gap detection and spawning depend on it | A | M0 | Start from the examples in WORKFLOW.md |
 
 ## Resolved
 
@@ -30,5 +33,9 @@ Unresolved items. Each has an owner (role A, B or C, see COORDINATION.md) and a 
 |---|---|---|---|
 | Q-R1 | Which paper? | KAN vs MLP (D-001) | 2026-10-10 |
 | Q-R2 | Laptop or cloud compute first? | Local laptop worker first (D-013) | 2026-10-10 |
-| Q-R3 | Must the user supply a paper? | Paper path is P0; question-only entry is P1 (D-018) | 2026-10-10 |
+| Q-R3 | Must the user supply a paper? | Paper path is P0; question-only entry is P1 (D-018, superseded by D-028) | 2026-10-10 |
 | Q-R4 | Team size? | 3 developers, one frontend (D-023) | 2026-10-10 |
+| Q-R5 | Second small paper to prove memory transfer? (was Q-12) | Replaced by a second short run on another tabular dataset (D-035) | 2026-10-10 |
+| Q-R6 | Where do uploaded dataset files live? (was Q-13) | Datasets by URL, upload or worker path, no cap for now (D-034); storage detail continues as Q-18 | 2026-10-10 |
+| Q-R7 | Which entry paths, at what depth? | All four at full depth, paper first (D-028) | 2026-10-10 |
+| Q-R8 | How are agents chosen for combined inputs, and who decides the next agent? | Dynamic activation (D-031) and hybrid planning (D-032) | 2026-10-10 |

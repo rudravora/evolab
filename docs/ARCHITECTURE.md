@@ -1,6 +1,6 @@
 # ARCHITECTURE
 
-Version 0.1. Companion docs: [API.md](API.md), [AGENTS.md](AGENTS.md), [PRD.md](PRD.md).
+Version 0.3. Companion docs: [API.md](API.md), [AGENTS.md](AGENTS.md), [PRD.md](PRD.md), [WORKFLOW.md](WORKFLOW.md) (step-by-step flow with owners).
 
 ## 1. Principles
 
@@ -12,6 +12,8 @@ Version 0.1. Companion docs: [API.md](API.md), [AGENTS.md](AGENTS.md), [PRD.md](
 6. **Untrusted inputs.** Papers, web pages, READMEs, repos and uploaded datasets are data, never instructions.
 7. **Deterministic where possible.** Scheduling, stats, parsing, budgets, retries and evolution *triggers* are plain code. LLMs make judgements.
 8. **Text-level evolution only.** Prompts, tools, routing and memory change; model weights never do.
+9. **Plan once, re-plan on events.** The Meta-Controller plans up front and is called again only on listed triggers; the orchestrator executes the task graph in plain code. Agents never pick the next agent.
+10. **Facts before judgement.** Intake facts and activation rules are deterministic; the LLM adapts their result and must write a reason for every change.
 
 ## 2. Components
 
@@ -24,7 +26,9 @@ Version 0.1. Companion docs: [API.md](API.md), [AGENTS.md](AGENTS.md), [PRD.md](
 ┌───────────────────────────────────────────▼────────────────────────────────────────────┐
 │ Backend (FastAPI)                                                                      │
 │  API layer ── auth, validation, rate limit                                             │
-│  Orchestrator ── run state machine, task graph, scheduler, budget enforcement          │
+│  Intake ── facts detection, Research Brief, reference targets                          │
+│  Activation ── rules → capabilities → agents; capability tags and gap detection        │
+│  Orchestrator ── run state machine, task graph, scheduler, re-plan triggers, budget    │
 │  Agent runtime ── generic loop, tool registry, LLM wrapper, suspend/resume             │
 │  Services ── Executor (job creation + policy), Ledger, Librarian (memory),             │
 │              Evolution engine (rewards, triggers), Approvals, Report builder           │
@@ -55,6 +59,21 @@ Single Python file (`worker/worker.py`) with minimal dependencies (`requests`, o
 - **arXiv** (paper search and fetch) from the backend, not the worker.
 
 ## 3. Key flows
+
+### 3.0a Intake and the Research Brief
+
+1. `POST /projects` accepts any combination of inputs (at least one): `paper`, `question`, `repo`, `dataset`, `note`. Datasets arrive as a URL, a browser upload or a `worker_path`. No size cap for now (D-034, Q-18).
+2. Inputs are stored as untrusted data. URLs are queued for background fetch, never fetched in the request.
+3. **Facts detection** (deterministic service): classify each input; fetch metadata (paper title and arXiv id, README text, dataset size and format); look for links (README cites the paper, paper names the dataset, question names the paper). Ambiguous items only go to the Meta-Controller's fast model.
+4. Write the **Research Brief** to `runs.brief_json`: `entry_types[]`, `goal`, `inputs[]`, `facts[]`, `domain` tag, `reference_targets[]` ranked paper claim > repo-reported numbers > published baselines > internal baselines. Emit `intake.brief`.
+
+### 3.0b Activation and planning
+
+1. **Activation rules** (deterministic table in AGENTS.md section 4a) map facts to required capabilities and agents. Result stored in `runs.activation_json` with a reason per agent, including agents left inactive. Emit `agent.activation`.
+2. The **Meta-Controller** receives Brief, activation, budget, memory hits and the registry. It returns the adapted activation (with reasons), the **task graph** built from per-entry-type **fragments** joined by the activation rules, the mode (A/B/C), confirmed reference targets and estimates.
+3. Tasks carry `required_tags`; any task no active agent covers is a **capability gap** (section 3.10).
+4. A `plan` approval is created. On reject the run re-plans with the comment; on approve the run goes to `running`.
+5. Question-only runs also create a `candidate_selection` approval once the Paper Analyst returns 3–5 candidates; the exploratory branch starts without waiting for it.
 
 ### 3.1 Worker pairing
 1. Dashboard `POST /workers/pairing` returns a one-time pairing code and a ready-made command.
@@ -111,16 +130,16 @@ proposed ─▶ awaiting_approval(optional) ─▶ queued ─▶ running ─▶ 
 A decision (`expanded` or `pruned`) always stores `decision_reason` and the evidence (metric deltas, seed variance).
 
 ### 3.6 Approvals
-Types: `plan`, `expensive_run`, `risky_command`, `new_package`, `evolution`, `branch_expand`, `human_input`.
+Types: `plan` (full plan or a re-plan diff), `expensive_run`, `risky_command`, `new_package`, `evolution`, `branch_expand`, `human_input`, `candidate_selection`.
 Status: `pending`, `approved`, `rejected`, `edited`, `expired`. Approvals created from the dashboard, optionally mirrored to n8n for phone decision. Expired approvals default to *reject*.
 
 ### 3.7 Evolution loop (after each completed task and each run)
 1. Compute reward per agent task (formula in AGENTS.md).
 2. Update rolling averages.
-3. Evolution engine (deterministic triggers) emits **candidates**: refine, spawn, merge, retire.
+3. Evolution engine (deterministic triggers) emits **candidates**: refine, spawn, merge, retire. Spawn candidates and planning-time gaps go through the resolution ladder (section 3.10).
 4. For each candidate, the Meta-Controller (LLM) drafts the change (new prompt, new agent spec, merge plan).
 5. An `evolution` approval is created; on approval the change is applied (new `agent_versions` row, new `agents` row, status change) and an event is logged.
-6. A/B window: a refined version is tried for the next 2 tasks; if mean reward is lower than the previous version, roll back automatically.
+6. Probation (A/B window): a refined version, or a newly spawned, restored or instantiated agent, handles the next 2 matching tasks; if its mean reward is lower than the version or agent it replaces, it is rolled back or retired automatically.
 
 ### 3.8 Memory
 - **Write:** only verified lessons (the fix was re-run and passed). Dedupe by `signature`; increment `success_count` or `fail_count`.
@@ -128,20 +147,51 @@ Status: `pending`, `approved`, `rejected`, `edited`, `expired`. Approvals create
 - **Feedback:** after the task, record whether retrieved entries helped.
 - **Labels:** `source` is `seeded` or `learned`. UI shows the label.
 
+### 3.9 Re-planning (hybrid model)
+
+The orchestrator executes the approved graph without LLM calls. It calls the Meta-Controller in `replan` mode (current graph + trigger) only on these triggers:
+
+| Trigger | Source |
+|---|---|
+| New fact in a finished task's `signals[]` | Agent output |
+| Data issue (leakage, missing target) | Env and Data Engineer `signals[]` |
+| Same error class failed twice, not fixed | Debugger escalation |
+| Branch results arrive | Evaluator |
+| Researcher chat, rejected approval, input added mid-run | API |
+| 70 percent of wall time or tokens used | Budget monitor |
+| Capability gap | Activation service, evolution engine |
+
+The returned diff is classified: **minor** (add a debug or data-fix task, reorder pending tasks, drop a crashed branch) applies at once and is logged as `plan.revised`; **major** (new agent activated, new reference target, budget increase, mode change) creates a `plan` approval showing the diff, while unaffected tasks continue. Every revision is a `plan_revisions` row.
+
+### 3.10 Capability gaps and the resolution ladder
+
+- Agent versions carry `capability_tags`; tasks carry `required_tags`. An agent matches when its tags cover all required tags; ties are broken by rolling reward. Intake adds a `domain:*` tag (`materials`, `edge-ml`, `cpu-ml`, `3d`, `general`).
+- Gap sources: planning time (activation), runtime (repeated unfixed failure class), researcher request (chat).
+- Ladder, cheapest first, stopping at the first fit: **1 reuse** an active agent (no approval) → **2 restore** an inactive or retired agent with rolling reward ≥ 0.5 → **3 instantiate** a dormant template (`kind: template`) → **4 specialise** a broad agent into a narrower child → **5 fresh spawn** a spec drafted by the Meta-Controller.
+- Steps 2–5 create an `evolution` approval (gap, evidence, proposed spec, lineage, expected effect), then probation (section 3.7).
+- Guardrails: tools only from the existing registry; core agents never changed; spawned agents cannot spawn; at most 15 active agents; one evolution action per agent per run; the untrusted-content rule is appended to every prompt by code.
+- Domain-specific agents (22 across materials, edge ML, CPU ML, 3D) are **out of v1 build scope**; the template library may hold dormant stubs (Q-20) or stay empty.
+
 ## 4. Data model
 
-SQLite for development; Postgres for deployment if Voroa provides persistence (VERIFY). IDs are text (UUID or ULID). Timestamps are UTC ISO strings. JSON columns are validated at the API layer.
+SQLite for development; Voroa managed Postgres for deployment. Memory keyword search uses FTS5 on SQLite and Postgres full-text search (`tsvector`) in deployment, behind one Librarian interface. IDs are text (UUID or ULID). Timestamps are UTC ISO strings. JSON columns are validated at the API layer.
 
 ```sql
 workers(id, owner_id, name, token_hash, status, platform, last_heartbeat, cpu_pct, ram_pct, capabilities_json)
 projects(id, owner_id, name, goal, workspace_path, created_at)
-inputs(id, project_id, kind, ref, meta_json, created_at)         -- paper|repo|dataset|note
-runs(id, project_id, goal, status, budget_json, usage_json, started_at, ended_at)
+inputs(id, project_id, kind, ref, source, meta_json, created_at)
+        -- kind: paper|question|repo|dataset|note ; source: url|upload|worker_path|text
+runs(id, project_id, goal, status, entry_types_json, brief_json, activation_json, plan_version,
+     budget_json, usage_json, started_at, ended_at)
+plan_revisions(id, run_id, version, trigger, kind, diff_json, reason, approval_id, created_at)
+        -- kind: initial|minor|major
 
-agents(id, name, role, kind, status, current_version_id, parent_ids_json, created_at)
-        -- kind: core|seed|spawned ; status: active|inactive|retired
-agent_versions(id, agent_id, version, system_prompt, tools_json, model, reason, parent_version_id, created_at)
-agent_tasks(id, run_id, agent_version_id, task_type, input_json, output_json, status,
+agents(id, name, role, kind, status, origin, current_version_id, parent_ids_json, created_at)
+        -- kind: core|seed|spawned|template ; status: active|inactive|retired|dormant
+        -- origin: seed|template:<name>|specialised:<agent_id>|fresh|restored
+agent_versions(id, agent_id, version, system_prompt, tools_json, capability_tags_json, model, reason,
+               parent_version_id, probation_json, created_at)
+agent_tasks(id, run_id, agent_version_id, task_type, required_tags_json, input_json, output_json, signals_json, status,
             tokens_in, tokens_out, wall_s, cost_norm, outcome_score, feedback, reward,
             failure_origin_agent_id, created_at, ended_at)
 agent_messages(id, task_id, seq, role, content, tool_name, tool_args_json, tool_result_json, ts)
@@ -157,7 +207,7 @@ ledger_entries(id, run_id, task_id, category, description, diff_ref, before_json
         -- category: compute_adaptation|dependency_fix|bug_fix|hyperparameter_change|fidelity_deviation
 memory_entries(id, kind, signature, context_json, content_json, embedding, source,
                success_count, fail_count, last_used_at, created_at)
-        -- kind: error_fix|config_outcome|audit|gotcha|lesson ; source: seeded|learned
+        -- kind: error_fix|config_outcome|audit|gotcha|lesson|dataset_profile ; source: seeded|learned
 approvals(id, run_id, type, payload_json, status, requested_by, decided_via, comment, token_hash, expires_at, decided_at)
 notes(id, project_id, title, markdown, source_ref, updated_at)
 artifacts(id, run_id, kind, path, sha256, size, created_at)
@@ -173,7 +223,7 @@ Indexes that matter: `jobs(status, created_at)`, `jobs(worker_id, status)`, `eve
 | Tool | Runs on | Notes |
 |---|---|---|
 | `finish` | Backend | Ends the task; output validated against the role's JSON schema |
-| `search_arxiv`, `fetch_pdf_text` | Backend | Returns text; treated as untrusted |
+| `search_papers` (arXiv), `fetch_pdf_text`, `find_repo`, `search_baselines` | Backend | Returns text; treated as untrusted. `search_baselines` looks up published results for a dataset |
 | `read_memory`, `write_memory` | Backend (Librarian) | `write_memory` requires a verified flag |
 | `log_ledger`, `read_ledger` | Backend (Ledger) | Category is mandatory on write |
 | `record_metric` | Backend | Writes to `experiments.metrics_json` |
@@ -181,7 +231,10 @@ Indexes that matter: `jobs(status, created_at)`, `jobs(worker_id, status)`, `eve
 | `read_logs` | Backend | Reads `job_logs` and `stdout_tail`/`stderr_tail` of a job |
 | `search_agents` | Backend, Meta-Controller | Searches the agent registry by role, tools and score |
 | `propose_branch`, `request_approval`, `get_budget` | Backend | |
-| `spawn_agent` | Backend, Meta-Controller only | Creates an `evolution` approval |
+| `spawn_agent` | Backend, Meta-Controller only | Creates an `evolution` approval; walks the ladder first |
+| `match_agents` | Backend, Meta-Controller | Returns agents and dormant templates whose tags cover a tag set |
+| `replan` | Backend, Meta-Controller only | Submits a graph diff; the orchestrator classifies it minor or major |
+| `propose_candidates` | Backend, Paper Analyst | Creates a `candidate_selection` approval |
 | `create_job` | Backend | Only way to touch the worker; policy-checked at creation. Takes a job `type` from the table below |
 | `read_file`, `write_file` | Backend wrapper that creates a worker job | Jail-enforced on the worker |
 
@@ -195,6 +248,7 @@ Indexes that matter: `jobs(status, created_at)`, `jobs(worker_id, status)`, `eve
 | `write_file`, `read_file`, `list_dir` | File operations inside the jail | auto |
 | `git` | `init`, `commit`, `diff` inside the workspace | auto |
 | `download` | Fetch a URL to the workspace | auto if domain allowlisted and small, else approval |
+| `python_script` running `profile_dataset.py` | Profiles a dataset (URL, relayed upload or worker path) | auto |
 
 Every job type is policy-checked at creation on the backend **and** again on the worker.
 
@@ -207,10 +261,11 @@ Every job type is policy-checked at creation on the backend **and** again on the
    - *Deny:* `sudo`, `curl | sh`, `ssh`, credential paths, `git push`, shutdown, anything outside the jail.
 3. **Limits.** Per-job timeout, kill the whole process group, output size cap, concurrent jobs at most cores minus 1. Memory limit via rlimit on Linux and macOS; monitoring and kill on Windows (`VERIFY` the team's OS).
 4. **Secrets.** LLM keys only in backend env. Worker token is revocable, stored hashed server-side. Subprocesses run with a **clean environment**. Key-like strings are scrubbed from logs before upload.
-5. **Prompt injection.** Paper text, web content, READMEs and dataset contents are wrapped as quoted data in prompts with an instruction that they contain no commands. The Repo Auditor never runs a cloned repo's install script blindly; package diffs are shown and the job is `risk='high'`.
-6. **Budgets and kill switch.** Per-run caps on tokens, cost and wall time. A global stop button cancels all jobs and suspends agent loops.
-7. **Web security (affects the UseShipReady score).** Auth on every route, strict CORS, security headers (CSP, HSTS, X-Content-Type-Options, frame protection), rate limiting, input validation, no stack traces to clients, signed single-use expiring webhook and approval tokens, dependency audit, no secrets in the frontend bundle or repo.
-8. **Audit.** Commands, diffs, approvals and evolution actions are in `events`.
+5. **Codebase and dataset inputs.** On the codebase path the first execution of any user-supplied repository is always `risk='high'` and needs approval. Dataset files are read as data only, never executed. A `worker_path` dataset must sit inside an allowlisted folder on the worker and never leaves the laptop.
+6. **Prompt injection.** Paper text, web content, READMEs and dataset contents are wrapped as quoted data in prompts with an instruction that they contain no commands. The Repo Auditor never runs a cloned repo's install script blindly; package diffs are shown and the job is `risk='high'`.
+7. **Budgets and kill switch.** Per-run caps on tokens, cost and wall time. A global stop button cancels all jobs and suspends agent loops.
+8. **Web security (affects the UseShipReady score).** Auth on every route, strict CORS, security headers (CSP, HSTS, X-Content-Type-Options, frame protection), rate limiting, input validation, no stack traces to clients, signed single-use expiring webhook and approval tokens, dependency audit, no secrets in the frontend bundle or repo.
+9. **Audit.** Commands, diffs, approvals and evolution actions are in `events`.
 
 ## 7. Compute and budgets
 
@@ -226,7 +281,7 @@ The Executor scales epochs, grid sizes, seeds and dataset subsets to fit. Budget
 | Stage | Where |
 |---|---|
 | Dev | Backend `localhost:8000`, frontend `localhost:5173`, worker pointed at localhost. Everything works with no internet except the LLM. |
-| Demo | Backend and frontend on **Voroa** from the GitHub repo; worker on the presenter's laptop pointed at the Voroa URL. Local-only mode kept as fallback. |
+| Demo | Backend and frontend on **Voroa** from the GitHub repo (web services plus managed Postgres); worker on the presenter's laptop pointed at the Voroa URL. Local-only mode kept as fallback. Large dataset uploads are relayed to the worker, not kept on the backend (Q-18). |
 
 Environment variables (all in `.env.example`, never committed with values):
 `LLM_PROVIDER`, `LLM_API_KEY_*`, `LLM_MODEL_STRONG`, `LLM_MODEL_FAST`, `DATABASE_URL`, `APP_SECRET`, `ALLOWED_ORIGINS`, `N8N_WEBHOOK_URL`, `N8N_SIGNING_SECRET`, `PUBLIC_BASE_URL`.
@@ -247,7 +302,7 @@ evolab/
   frontend/     React app
   shared/       openapi.yaml, JSON schemas for agent I/O, example payloads
   experiments/  KAN vs MLP seed code, seeded memory entries (JSON)
-  docs/         these files
+  docs/         these files (including WORKFLOW.md)
   scripts/      dev helpers (seed DB, run mock worker)
 ```
 
@@ -256,7 +311,7 @@ evolab/
 | Area | Choice | Why |
 |---|---|---|
 | Backend | Python, FastAPI, SQLAlchemy | Same language as ML code and worker; fast to build |
-| DB | SQLite (dev), Postgres (deploy if needed) | Zero setup; FTS5 for memory |
+| DB | SQLite (dev), Voroa managed Postgres (deploy) | Zero setup locally; FTS5 locally, Postgres full-text in deployment |
 | Realtime | Server-Sent Events | Simpler than WebSockets, enough for one-way updates |
 | Frontend | React, Vite, TypeScript, Tailwind | Fast iteration, mobile-friendly |
 | Charts and tree | A charting library plus a tree/graph component (e.g., React Flow) `VERIFY` | Experiment tree is a key visual |
@@ -267,4 +322,6 @@ evolab/
 
 - Multi-user and auth are minimal (single owner account is enough for the demo).
 - Mode C and Colab are stretch and shape no P0 interface; keep the worker `capabilities` field so a Colab worker can be added without API changes.
-- Evolution quality depends on the LLM; deterministic triggers and approvals bound the damage.
+- Evolution quality depends on the LLM; deterministic triggers, the ladder, approvals and probation bound the damage.
+- Four full-depth entry paths widen the surface; fragments share agents and the build order in PRD 6a is the safety net.
+- No upload size cap (D-034) is a deployment risk until Q-18 is answered.
