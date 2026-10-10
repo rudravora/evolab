@@ -1,0 +1,139 @@
+{
+  "_comment": "Example /worker/jobs/{job_id}/result payload for a dataset-profiling job (API.md section 9: a python_script job running experiments/tools/profile_dataset.py). Per API.md: 'Its result metrics carry the profile summary and files carry the full profile JSON.' Dataset values here are entirely synthetic placeholders.",
+  "attempt": 1,
+  "status": "done",
+  "exit_code": 0,
+  "stdout_tail": "profiled sample_dataset.csv: 10 rows, 5 cols, target='churned' (classification), 2 warning(s) -> profile.json\n",
+  "stderr_tail": "",
+  "metrics": {
+    "n_rows": 10,
+    "n_cols": 5,
+    "duplicate_row_count": 0,
+    "target_task_type": "classification",
+    "n_warnings": 2,
+    "n_leakage_hints": 0,
+    "n_highly_correlated_pairs": 0
+  },
+  "files": [
+    {
+      "path": "results/profile.json",
+      "sha256": "150e6fe5b0c6c0889cea56d126a126c32d07573b9ae27b893d0d68e653f11abd"
+    }
+  ],
+  "profile": {
+    "file": {
+      "path": "data/sample_dataset.csv",
+      "format": "csv",
+      "bytes": 344,
+      "sampled": false,
+      "rows_read": 10
+    },
+    "n_rows": 10,
+    "n_cols": 5,
+    "columns": {
+      "customer_id": {
+        "dtype": "str",
+        "missing_count": 0,
+        "missing_fraction": 0.0,
+        "n_unique": 10,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "std": null,
+        "top_values": [
+          ["C0001", 1],
+          ["C0002", 1],
+          ["C0003", 1],
+          ["C0004", 1],
+          ["C0005", 1],
+          ["C0006", 1],
+          ["C0007", 1],
+          ["C0008", 1],
+          ["C0009", 1],
+          ["C0010", 1]
+        ],
+        "is_constant": false,
+        "is_near_constant": false,
+        "is_possible_id": true
+      },
+      "age": {
+        "dtype": "int64",
+        "missing_count": 0,
+        "missing_fraction": 0.0,
+        "n_unique": 10,
+        "min": 27.0,
+        "max": 61.0,
+        "mean": 41.3,
+        "std": 10.995453605922767,
+        "top_values": [],
+        "is_constant": false,
+        "is_near_constant": false,
+        "is_possible_id": true
+      },
+      "annual_income": {
+        "dtype": "float64",
+        "missing_count": 1,
+        "missing_fraction": 0.1,
+        "n_unique": 9,
+        "min": 33000.0,
+        "max": 75000.0,
+        "mean": 54111.11111111111,
+        "std": 13769.935043823232,
+        "top_values": [],
+        "is_constant": false,
+        "is_near_constant": false,
+        "is_possible_id": false
+      },
+      "account_type": {
+        "dtype": "str",
+        "missing_count": 0,
+        "missing_fraction": 0.0,
+        "n_unique": 2,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "std": null,
+        "top_values": [
+          ["standard", 6],
+          ["premium", 4]
+        ],
+        "is_constant": false,
+        "is_near_constant": false,
+        "is_possible_id": false
+      },
+      "churned": {
+        "dtype": "str",
+        "missing_count": 0,
+        "missing_fraction": 0.0,
+        "n_unique": 2,
+        "min": null,
+        "max": null,
+        "mean": null,
+        "std": null,
+        "top_values": [
+          ["no", 7],
+          ["yes", 3]
+        ],
+        "is_constant": false,
+        "is_near_constant": false,
+        "is_possible_id": false
+      }
+    },
+    "duplicate_row_count": 0,
+    "target": {
+      "column": "churned",
+      "task_type": "classification",
+      "guessed": false
+    },
+    "class_balance": {
+      "no": 7,
+      "yes": 3
+    },
+    "highly_correlated_pairs": [],
+    "leakage_hints": [],
+    "warnings": [
+      "column 'customer_id' looks like an ID column (all values unique)",
+      "column 'age' looks like an ID column (all values unique)"
+    ]
+  }
+}
