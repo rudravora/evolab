@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     run_sweeper: bool = True          # worker offline, requeue, approval expiry
     run_orchestrator: bool = True     # scheduler that drives agent tasks
     pipeline: Literal["agents", "pipe_check"] = "agents"   # pipe_check = the M1 fake agent
+    simulation: bool = False          # scripted AI and a simulated worker (backend/scripts/sim_server.py); shown in the UI
 
     # LLM gateway (D-041)
     llm_base_url: str = ""

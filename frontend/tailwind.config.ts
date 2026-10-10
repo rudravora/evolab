@@ -31,11 +31,13 @@ const config: Config = {
           DEFAULT: "var(--cyan-core)",
           dim: "var(--cyan-dim)",
           glow: "var(--cyan-glow)",
+          highlight: "var(--cyan-highlight)",
         },
         amber: {
           DEFAULT: "var(--amber-core)",
           dim: "var(--amber-dim)",
           glow: "var(--amber-glow)",
+          highlight: "var(--amber-highlight)",
         },
         foreground: {
           DEFAULT: "var(--text-primary)",

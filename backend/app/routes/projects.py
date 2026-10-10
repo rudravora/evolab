@@ -30,6 +30,7 @@ EXAMPLE_INPUTS = [
     {"kind": "question", "source": "text", "ref": "Do KANs beat parameter-matched MLPs on real tabular data?"},
 ]
 EXAMPLE_GOAL = "Do KANs beat parameter-matched MLPs on real tabular data?"
+SIM_DATASET = {"kind": "dataset", "source": "url", "ref": "https://example.org/tabular-demo.csv"}
 
 
 class InputIn(BaseModel):
@@ -133,7 +134,10 @@ def create_project(body: ProjectIn, request: Request, db: Session = Depends(get_
     inputs = [i.model_dump() for i in body.inputs]
     goal = body.goal
     if body.example:
-        inputs, goal = EXAMPLE_INPUTS, EXAMPLE_GOAL
+        inputs, goal = list(EXAMPLE_INPUTS), EXAMPLE_GOAL
+        if request.app.state.settings.simulation:
+            # The full combined demo (D-035) includes a tabular dataset; live runs wait for Q-19.
+            inputs.append(SIM_DATASET)
     if not inputs and goal and goal.strip().endswith("?"):
         inputs = [{"kind": "question", "source": "text", "ref": goal}]
     if not inputs:

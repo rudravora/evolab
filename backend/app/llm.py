@@ -47,6 +47,12 @@ class LLMRateLimited(LLMError):
     """The orchestrator turns this into a short pause, not a task failure (AGENTS.md section 3)."""
 
 
+class LLMUnavailable(LLMRateLimited):
+    """No usable answer after retries (connection dropped, timeout, 5xx). Treated like a rate
+    limit: the task pauses and tries again later instead of failing the run (seen live on a
+    phone hotspot)."""
+
+
 @dataclass
 class LLMReply:
     text: str
@@ -160,7 +166,7 @@ class LLMClient:
             except httpx.HTTPError as exc:
                 # Timeouts, dropped connections and undecodable error pages (seen live from the
                 # gateway on long requests) are all retried, then reported as a gateway error.
-                status, data = 0, {"error": f"{type(exc).__name__}"}
+                status, data = 0, {"error": f"{type(exc).__name__}: {str(exc)[:200]}"}
             latency = time.monotonic() - started
             if status == 200:
                 reply = self._parse(tier, data, latency, trimmed)
@@ -175,7 +181,8 @@ class LLMClient:
             if delay is None:
                 if status == 429:
                     raise LLMRateLimited(f"{tier}: rate limited after {attempt + 1} attempts")
-                raise LLMError(f"{tier}: gateway error {status} after {attempt + 1} attempts")
+                raise LLMUnavailable(f"{tier}: gateway {'unreachable' if status == 0 else f'error {status}'} after "
+                                     f"{attempt + 1} attempts ({str(data.get('error', ''))[:200]})")
             time.sleep(delay)
         raise LLMError("unreachable")
 

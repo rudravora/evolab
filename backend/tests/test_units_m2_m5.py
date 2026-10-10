@@ -283,8 +283,8 @@ def test_n8n_tokens_are_single_use_and_bound(agent_settings, llm, sm):
 def test_dashboard_rate_limit_and_body_cap(ac):
     big = {"goal": "x" * 10, "inputs": [{"kind": "note", "source": "text", "ref": "y" * 2000}] * 600}
     assert ac.post(f"{API}/projects", content=json.dumps(big), headers={"Content-Type": "application/json"}).status_code == 413
-    codes = [ac.get(f"{API}/agents").status_code for _ in range(125)]
-    assert 429 in codes and codes.index(429) >= 110
+    codes = [ac.get(f"{API}/agents").status_code for _ in range(305)]
+    assert 429 in codes and codes.index(429) >= 280
     assert ac.get(f"{API}/health").status_code == 200        # health is exempt
 
 
@@ -367,3 +367,37 @@ def test_fetch_pdf_text_search_returns_offsets(ac, driver, llm):
     result = next(m for m in ac.get(f"{API}/tasks/{t['id']}/messages").json() if m["tool_name"] == "fetch_pdf_text")
     text = result["tool_result"]["text"]
     assert text.startswith("8 match(es) for 'paper text'") and '"offset"' in text
+
+
+def test_unreachable_gateway_pauses_the_task_instead_of_failing_the_run(ac, driver, llm, monkeypatch):
+    import httpx
+
+    import app.llm as llm_mod
+    monkeypatch.setattr(llm_mod, "RETRY_DELAYS_S", (0, 0, 0))
+    run_id = start(ac)["run_id"]
+    driver.step()                                          # intake
+
+    def down(body, headers, timeout):
+        raise httpx.ConnectError("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed")
+    driver.services().llm.transport = down
+    driver.step()
+    plan = next(t for t in ac.get(f"{API}/runs/{run_id}/tasks").json() if t["task_type"] == "plan")
+    assert plan["status"] == "queued" and ac.get(f"{API}/runs/{run_id}").json()["status"] == "planning"
+    events = [e for e in ac.get(f"{API}/runs/{run_id}/events", params={"limit": 500}).json() if e["type"] == "agent.task"]
+    assert "CERTIFICATE_VERIFY_FAILED" in events[-1]["payload"]["summary"]
+
+
+def test_failed_readme_fetch_is_not_reported_as_unlinked(agent_app):
+    from app.intake import build_brief
+    from app.models import Input, Project, Run
+    with agent_app.state.db.sessionmaker() as db:
+        db.add(Project(id="proj_x", owner_id="usr_owner", name="x"))
+        db.flush()                                     # parent rows first (foreign keys)
+        db.add(Run(id="run_x", project_id="proj_x", status="planning"))
+        db.add(Input(id="inp_p", project_id="proj_x", kind="paper", ref="https://arxiv.org/abs/2404.19756", source="url",
+                     meta_json={"fetched": True, "arxiv_id": "2404.19756"}))
+        db.add(Input(id="inp_r", project_id="proj_x", kind="repo", ref="https://github.com/a/b", source="url",
+                     meta_json={"fetched": True, "fetch_error": "ConnectError: SSL"}))
+        db.commit()
+        facts = {f["fact"] for f in build_brief(db, db.get(Run, "run_x"))["facts"]}
+    assert "repo_fetch_failed" in facts and "repo_not_linked_to_paper" not in facts

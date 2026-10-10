@@ -40,7 +40,7 @@ Version 0.6. Base path: `/api/v1`. JSON everywhere unless noted. This file is th
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/health` | No auth. `{ "status": "ok", "version": "...", "time": "..." }` |
+| GET | `/health` | No auth. `{ "status": "ok", "version": "...", "time": "...", "mode": "live\|simulated" }`. `simulated` = scripted AI and a simulated worker (`backend/scripts/sim_server.py`); the dashboard shows a banner (D-027, D-054) |
 
 ## 2a. Sign-in (dashboard, D-044)
 
@@ -386,7 +386,7 @@ Token is single-use, bound to the approval id and one decision, and expires with
 
 | Scope | Limit |
 |---|---|
-| Dashboard routes | 120 req/min per user |
+| Dashboard routes | 300 req/min per user (raised from 120: the live dashboard polls several routes, D-054) |
 | Chat | 20 messages/min per run |
 | Worker log uploads | 10 req/s per worker |
 | Hook endpoints | 30 req/min per IP |

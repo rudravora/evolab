@@ -2159,11 +2159,15 @@ components:
         time:
           type: string
           title: Time
+        mode:
+          type: string
+          title: Mode
       type: object
       required:
       - status
       - version
       - time
+      - mode
       title: Health
     HeartbeatIn:
       properties:

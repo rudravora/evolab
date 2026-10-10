@@ -47,7 +47,8 @@ def _dataset_name(ref: str) -> str:
 
 def fetch_metadata(db: Session, services, run: Run) -> None:
     """Background fetch; failures are recorded as facts, never fatal."""
-    for inp in db.scalars(select(Input).where(Input.project_id == run.project_id)):
+    for inp in list(db.scalars(select(Input).where(Input.project_id == run.project_id))):
+        db.commit()                       # web fetches below must not run inside an open write transaction
         meta = dict(inp.meta_json or {})
         if meta.get("fetched"):
             continue
@@ -86,6 +87,10 @@ def build_brief(db: Session, run: Run) -> dict:
     for r in repos:
         m = r.meta_json or {}
         facts.append({"fact": "repo_present", "evidence": r.ref, "input_id": r.id})
+        if m.get("fetch_error"):
+            # Unknown is not "unlinked": never conclude anything from a README we could not read.
+            facts.append({"fact": "repo_fetch_failed", "evidence": m["fetch_error"], "input_id": r.id})
+            continue
         for p in papers:
             aid = (p.meta_json or {}).get("arxiv_id") or arxiv_id(p.ref)
             if aid and aid in (m.get("readme_arxiv_ids") or []):

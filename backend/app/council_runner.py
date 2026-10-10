@@ -98,33 +98,42 @@ def _ask_judge(services, judge: Agent, version: AgentVersion, prompt: str, trace
 def run(services, task_id: str) -> None:
     from .rewards import score
 
+    # Phase 1: read what the judges need, then end the transaction.
     with services.sessionmaker() as db:
         task = db.get(AgentTask, task_id)
         if task is None or (task.state_json or {}).get("council") != "running":
             return
         prompt = judge_input(db, task)
         trace = task.langsmith_trace_id
-        judges = list(db.scalars(select(Agent).where(Agent.role == "council_judge", Agent.status == "active").order_by(Agent.id)))
-        rows = list(db.scalars(select(CouncilScore).where(CouncilScore.task_id == task.id)))
-        done_judges = {r.judge_agent_id for r in rows}
-        limited = False
-        for judge in judges:
-            if judge.id in done_judges:          # a retry only asks the judges that were missing
-                continue
-            version = db.get(AgentVersion, judge.current_version_id)
-            out, tin, tout = _ask_judge(services, judge, version, prompt, trace)
-            if out == "rate_limited":
-                limited = True
-                continue
-            if out is None:
-                continue
-            row = CouncilScore(id=new_id("cs"), task_id=task.id, judge_agent_id=judge.id, tier=version.model,
-                               scores_json=out["scores"], overall=out["overall"], rationale=out["rationale"],
-                               failure_pattern=out.get("failure_pattern"), confidence=out["confidence"],
-                               tokens_in=tin, tokens_out=tout)
-            db.add(row)
-            rows.append(row)
+        done_judges = set(db.scalars(select(CouncilScore.judge_agent_id).where(CouncilScore.task_id == task.id)))
+        judges = [(j, db.get(AgentVersion, j.current_version_id)) for j in db.scalars(
+            select(Agent).where(Agent.role == "council_judge", Agent.status == "active").order_by(Agent.id))]
+        db.expunge_all()
+
+    # Phase 2: ask the judges with no database transaction open. Holding SQLite's write lock
+    # across slow, rate-limited AI calls blocked every other write, including the researcher's
+    # approvals (found in a live demo).
+    answers, limited = [], False
+    for judge, version in judges:
+        if judge.id in done_judges:          # a retry only asks the judges that were missing
+            continue
+        out, tin, tout = _ask_judge(services, judge, version, prompt, trace)
+        if out == "rate_limited":
+            limited = True
+        elif out is not None:
+            answers.append((judge.id, version.model, out, tin, tout))
             services.tracer.feedback(trace, f"council.{version.model}", out["overall"], out["rationale"])
+
+    # Phase 3: write everything in one short transaction.
+    with services.sessionmaker() as db:
+        task = db.get(AgentTask, task_id)
+        for judge_id, tier, out, tin, tout in answers:
+            db.add(CouncilScore(id=new_id("cs"), task_id=task.id, judge_agent_id=judge_id, tier=tier,
+                                scores_json=out["scores"], overall=out["overall"], rationale=out["rationale"],
+                                failure_pattern=out.get("failure_pattern"), confidence=out["confidence"],
+                                tokens_in=tin, tokens_out=tout))
+        db.flush()
+        rows = list(db.scalars(select(CouncilScore).where(CouncilScore.task_id == task.id)))
         result = aggregate([{"overall": r.overall, "failure_pattern": r.failure_pattern} for r in rows])
         task.council_q, task.council_judges = result.q, result.judges
         task.council_disagreement, task.council_split = result.disagreement, result.split

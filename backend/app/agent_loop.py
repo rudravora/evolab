@@ -30,6 +30,7 @@ SCHEMAS = Path(__file__).resolve().parent.parent.parent / "shared" / "schemas"
 MAX_PROTOCOL_REPAIRS = 2
 MAX_SCHEMA_REPAIRS = 1
 RATE_LIMIT_PAUSE_S = 30
+MAX_PAUSES = 20                   # about 10+ minutes of an unreachable or rate-limited AI service
 TASK_TOKEN_CAP = 250_000
 OUTPUT_TOKENS: dict[str, int] = {}          # all tasks use the gateway maximum (4000)
 
@@ -124,13 +125,20 @@ def _run(db, services, task: AgentTask) -> None:
             return fail(db, services, task, agent, f"step cap reached ({version.max_steps})")
         if task.tokens_in + task.tokens_out > TASK_TOKEN_CAP:
             return fail(db, services, task, agent, "token cap reached for this task")
+        # Never hold SQLite's write lock across a slow AI call: other writers (approvals,
+        # the worker's results) would wait and time out (found in a live demo).
+        _set_state(task, messages=messages)
+        db.commit()
         try:
             reply = services.llm.call(version.model, messages, max_output_tokens=OUTPUT_TOKENS.get(task.task_type, 4000),
                                       trace=trace, name=agent.role)
-        except LLMRateLimited:
-            _set_state(task, messages=messages, retry_at=time.time() + RATE_LIMIT_PAUSE_S)
+        except LLMRateLimited as exc:
+            pauses = (task.state_json or {}).get("pauses", 0) + 1
+            if pauses > MAX_PAUSES:
+                return fail(db, services, task, agent, f"AI service unavailable after {MAX_PAUSES} pauses: {exc}")
+            _set_state(task, messages=messages, retry_at=time.time() + RATE_LIMIT_PAUSE_S, pauses=pauses)
             task.status = "queued"
-            _task_event(db, task, agent, "rate limited; pausing briefly")
+            _task_event(db, task, agent, f"AI service busy or unreachable; retrying in {RATE_LIMIT_PAUSE_S}s ({exc})")
             return
         except LLMError as exc:
             return fail(db, services, task, agent, f"LLM error: {exc}")
@@ -161,6 +169,7 @@ def _run(db, services, task: AgentTask) -> None:
             db.commit()
             continue
 
+        db.commit()                       # some tools fetch from the web; don't hold the lock meanwhile
         result = run_tool(ctx, name, args)
         services.tracer.log_tool(trace, name, args, result.content if isinstance(result, Inline) else
                                  (result.output if isinstance(result, Finish) else {"suspend": result.kind, "id": result.id}))

@@ -25,5 +25,16 @@ After changing routes, regenerate the contract file with `python scripts/export_
 ### Worker
 TODO: setup and run instructions for `worker/`.
 
-### Frontend
-TODO: setup and run instructions for `frontend/` (React app).
+### Frontend (dashboard)
+Next.js app in `frontend/`. Node 20 or newer.
+
+1. Install once: `npm --prefix frontend ci`
+2. Run: `npm --prefix frontend run dev`, then open http://localhost:3000 and sign in with the owner password.
+
+The browser only talks to the Next.js server; it proxies `/api/v1/*` to the backend (default `http://127.0.0.1:8000`, override with `EVOLAB_BACKEND_URL`). Pages: `/dashboard` (pair a worker, start a run, list runs), `/runs/<id>` (approvals, pipeline, experiment tree, Brief, report, ledger, team, live events, chat, task transcripts with council scores), `/agents`, `/memory`.
+
+### Whole app in simulated mode (demo in about 3 minutes)
+Same backend code with scripted AI replies and a built-in simulated laptop worker; the UI shows a SIMULATED banner.
+
+1. Stop the live backend (Ctrl+C), then inside `backend/`: `py scripts/sim_server.py` (fresh `sim.db` each start; `--delay 2` to slow it down)
+2. `npm --prefix frontend run dev`, open http://localhost:3000, sign in, click **Try the KAN example**, approve the plan and the evolution proposal.

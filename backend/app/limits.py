@@ -12,7 +12,7 @@ from starlette.responses import JSONResponse
 from .errors import ApiError, error_body
 from .security import SESSION_COOKIE, RateLimiter
 
-DASHBOARD_LIMIT = (120, 60.0)              # 120 requests per minute per user
+DASHBOARD_LIMIT = (300, 60.0)              # 300 requests per minute per user (a live dashboard polls several routes)
 JSON_BODY_MAX = 1 * 1024 * 1024            # 1 MB for JSON bodies
 UPLOAD_PATHS = ("/inputs", "/worker/artifacts")
 EXEMPT = ("/api/v1/health", "/api/v1/worker/", "/api/v1/hooks/", "/api/v1/uploads/")

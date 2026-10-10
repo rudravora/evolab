@@ -150,3 +150,29 @@ def test_cancel_stops_agents_and_branches(ac, driver):
     assert ac.post(f"{API}/runs/{run_id}/cancel").json()["status"] == "cancelled"
     tasks = ac.get(f"{API}/runs/{run_id}/tasks").json()
     assert all(t["status"] in ("done", "failed", "cancelled", "skipped") for t in tasks)
+
+
+def test_no_write_lock_is_held_during_ai_calls(agent_app, agent_settings, ac, driver, llm):
+    """Regression (live demo): the council held SQLite's write lock while waiting on AI calls,
+    so the researcher's approval timed out. During every AI call the DB must stay writable."""
+    import sqlite3
+
+    db_path = agent_settings.database_url.removeprefix("sqlite:///")
+    blocked = []
+
+    def checking(body, headers, timeout):
+        con = sqlite3.connect(db_path, timeout=0.2)
+        try:
+            con.execute("BEGIN IMMEDIATE")          # needs the write lock
+            con.execute("ROLLBACK")
+        except sqlite3.OperationalError as exc:
+            blocked.append((body["messages"][0]["content"][:40], str(exc)))
+        finally:
+            con.close()
+        return llm(body, headers, timeout)
+
+    agent_app.state.services.llm.transport = checking
+    run_id = start(ac)["run_id"]
+    assert driver.run(run_id) == "done"
+    assert any("Performance Council" in b["messages"][0]["content"] for b in llm.calls)
+    assert blocked == []

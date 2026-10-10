@@ -18,3 +18,7 @@ out/
 # Backend runtime files (reports, uploads, caches)
 backend/artifacts/
 artifacts/
+backend/sim_artifacts/
+*.db-shm
+*.db-wal
+*.tsbuildinfo

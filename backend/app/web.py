@@ -12,6 +12,7 @@ import io
 import ipaddress
 import re
 import socket
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from urllib.parse import quote, urljoin, urlparse
@@ -40,7 +41,20 @@ def _public_host(host: str) -> None:
             raise FetchError(f"blocked non-public address for {host}")
 
 
-def safe_get(url: str, *, headers: dict | None = None, max_bytes: int = MAX_BYTES, method: str = "GET") -> httpx.Response:
+def safe_get(url: str, *, headers: dict | None = None, max_bytes: int = MAX_BYTES, method: str = "GET",
+             retries: int = 2) -> httpx.Response:
+    """Fetch with SSRF checks. Dropped connections and TLS hiccups are retried (seen live on a hotspot)."""
+    for attempt in range(retries + 1):
+        try:
+            return _safe_get_once(url, headers=headers, max_bytes=max_bytes, method=method)
+        except httpx.TransportError:
+            if attempt == retries:
+                raise
+            time.sleep(2 * (attempt + 1))
+    raise FetchError("unreachable")
+
+
+def _safe_get_once(url: str, *, headers: dict | None, max_bytes: int, method: str) -> httpx.Response:
     for _ in range(MAX_REDIRECTS + 1):
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https") or not parsed.hostname:
