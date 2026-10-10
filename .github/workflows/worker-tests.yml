@@ -1,0 +1,68 @@
+name: worker-tests
+
+"on":
+  pull_request: {}
+  push:
+    branches:
+      - "b/**"
+
+# Least privilege: this workflow only needs to read the repo and report
+# check status: no write access to contents, PRs, issues, etc.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: worker tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      # actions/checkout v7.0.1, pinned by commit SHA
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      # actions/setup-python v7.0.0, pinned by commit SHA.
+      # Python 3.14 -- NOT independently verified against the live
+      # actions/setup-python version manifest for this run (see the task
+      # report: WebFetch on that manifest only reliably showed the newest
+      # entries of a very large file). If this step fails to resolve 3.14,
+      # that is the signal to drop to the nearest available 3.14.x patch or
+      # to 3.13 and update this comment.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.14"
+
+      - name: Install worker dependencies
+        shell: bash
+        run: python -m pip install -r worker/requirements.txt
+
+      - name: Run worker tests
+        shell: bash
+        run: |
+          set -e
+          cd worker
+          python test_policy.py
+          python test_policy_windows.py
+          python test_runner.py
+          python test_worker.py
+          python test_worker_errors.py
+
+      - name: Run experiments tests (if present)
+        shell: bash
+        run: |
+          set -e
+          if [ -d experiments/tests ] && [ -n "$(find experiments/tests -maxdepth 1 -name 'test_*.py' -print -quit)" ]; then
+            if [ -f experiments/requirements.lock ]; then
+              python -m pip install -r experiments/requirements.lock
+            fi
+            for f in experiments/tests/test_*.py; do
+              python -m "experiments.tests.$(basename "$f" .py)"
+            done
+          else
+            echo "No experiments/tests found; skipping."
+          fi

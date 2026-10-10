@@ -1,37 +1,38 @@
 """Job runner: executes a job's argv under worker/policy.py's checks
 (ARCHITECTURE.md sections 3.2 job lifecycle and 6 safety).
 
-macOS and Linux only -- no Windows support (worker.py exits at startup on
-Windows; see its platform guard). Uses POSIX process groups
-(start_new_session=True) and the `resource` module, both POSIX-only, so this
-module guards their import: importing runner.py on Windows must not raise at
-import time (a Windows machine might still `import runner` transitively,
-e.g. from a test collector, before worker.py's own guard has a chance to
-exit), even though none of the process-execution functions here are
-reachable or usable on Windows.
+Cross-platform: Windows, macOS and Linux. No POSIX-only (or Windows-only)
+module is imported at top level unconditionally -- resource (POSIX) and the
+Windows-only bits of subprocess/os are all guarded, so importing this module
+on any platform never raises, even though the actual process-tree-kill path
+differs per platform (see kill_process_tree below).
 
 Safety properties:
 - Never starts a process for a `deny` verdict, or an un-approved
   `needs_approval` verdict.
-- Runs in its own process group so the whole group (including any children
-  the job spawns) can be killed together.
-- Per-job wall-clock timeout: SIGTERM to the group, short grace period, then
-  SIGKILL. Reports `timed_out`.
+- POSIX: runs in its own process group (start_new_session=True) so the
+  whole group, including any children the job spawns, can be signalled
+  together via os.killpg. Windows: runs with
+  CREATE_NEW_PROCESS_GROUP so SIGBREAK/CTRL_BREAK_EVENT could reach the
+  group, but the actual kill path is psutil-based tree walking (Windows has
+  no process-group-wide SIGKILL equivalent) with `taskkill /T /F` as a
+  fallback if psutil itself is unavailable or fails.
+- Per-job wall-clock timeout: terminate the whole process tree, short grace
+  period, then force-kill. Reports `timed_out`.
 - Output capped at max_output_bytes; stdout_tail/stderr_tail hold only the
   tail once the cap is hit.
-- Clean environment: PATH, HOME, a workspace-local TMPDIR, LANG, plus only
-  the payload-provided keys that pass policy.check_env. The parent's full
-  environment (including secrets) is never inherited.
-- RLIMIT_CPU, RLIMIT_NOFILE, RLIMIT_FSIZE are set via a preexec_fn, where
-  POSIX/macOS support them.
-  NOTE: macOS's `resource` module accepts RLIMIT_AS/RLIMIT_DATA calls but the
-  kernel does not actually enforce a process memory cap through them (this is
-  a documented macOS limitation, not a bug here) -- there is no working
-  memory rlimit on this platform. Instead, if `psutil` is installed, a
-  background thread polls each child's (and its children's) RSS and kills the
-  whole process group if the total exceeds `max_rss_bytes`. Without psutil,
-  there is no memory enforcement at all; this is a known gap, not silently
-  claimed as covered.
+- Clean environment, platform-specific base keys (see build_clean_env),
+  plus only the payload-provided keys that pass policy.check_env. The
+  parent's full environment (including secrets) is never inherited.
+- RLIMIT_CPU, RLIMIT_NOFILE, RLIMIT_FSIZE are set via a preexec_fn, POSIX
+  only (the `resource` module does not exist on Windows, and is not
+  meaningfully enforced on macOS for RLIMIT_AS/RLIMIT_DATA -- see the
+  memory note below).
+- Memory limit: enforced on every platform by polling RSS of the whole
+  process tree via psutil and killing the tree if it exceeds the cap, since
+  neither macOS nor Windows enforces a memory rlimit the way Linux does.
+  psutil is a required dependency (not optional) specifically so this
+  enforcement always exists.
 - Log lines are scrubbed for API-key/token-shaped strings before being
   batched into chunks and handed to the `on_log` callback, roughly once a
   second.
@@ -39,7 +40,6 @@ Safety properties:
 import json
 import os
 import re
-import signal
 import subprocess
 import sys
 import threading
@@ -47,26 +47,24 @@ import time
 from pathlib import Path
 
 import policy
+import psutil
 
 try:
     import resource
 except ImportError:
     resource = None  # resource is POSIX-only; absent on Windows
 
-try:
-    import psutil
-except ImportError:
-    psutil = None
+IS_WINDOWS = os.name == "nt"
 
 LOG_FLUSH_INTERVAL_S = 1.0
-SIGTERM_GRACE_S = 3.0
+TERMINATE_GRACE_S = 3.0
 DEFAULT_MAX_RSS_BYTES = 1024 * 1024 * 1024  # 1 GiB; caller may override
 MEMORY_POLL_INTERVAL_S = 1.0
 
 # RLIMIT_CPU is seconds of CPU time, used as a backstop alongside the
 # wall-clock timeout (a busy-looping single-threaded job hits this close to
 # its wall time; a mostly-sleeping job won't, which is intentional -- the
-# wall-clock timeout in run_job is the primary enforcement).
+# wall-clock timeout in run_job is the primary enforcement). POSIX only.
 DEFAULT_RLIMIT_CPU_S = 3600
 DEFAULT_RLIMIT_NOFILE = 256
 DEFAULT_RLIMIT_FSIZE_BYTES = 500 * 1024 * 1024  # 500 MiB per written file
@@ -92,20 +90,50 @@ def scrub_secrets(text: str) -> str:
     return text
 
 
-def build_clean_env(workspace_dir: Path, extra_env: dict | None) -> dict:
-    """Clean subprocess environment: PATH, HOME, a workspace-local TMPDIR,
-    LANG, plus only the extra_env keys that pass policy.check_env. The
-    parent process's environment is never inherited.
+# Base environment keys preserved from the worker process's own environment,
+# per platform. Everything else is dropped; only policy.check_env-approved
+# extra keys from the job payload are added on top (see build_clean_env).
+POSIX_BASE_ENV_KEYS = ("PATH", "HOME", "LANG")
+WINDOWS_BASE_ENV_KEYS = ("PATH", "PATHEXT", "SYSTEMROOT", "COMSPEC", "USERPROFILE", "TEMP", "TMP")
+
+
+def build_clean_env(workspace_dir: Path, extra_env: dict | None) -> tuple[dict, list[str]]:
+    """Clean subprocess environment: a small platform-appropriate base plus
+    a workspace-local temp dir, plus only the extra_env keys that pass
+    policy.check_env. The parent process's environment is never inherited.
     """
-    base = {
-        "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin"),
-        "HOME": os.environ.get("HOME", "/tmp"),
-        "TMPDIR": str(workspace_dir / ".tmp"),
-        "LANG": os.environ.get("LANG", "en_US.UTF-8"),
-    }
+    tmp_dir = str(workspace_dir / ".tmp")
+    if IS_WINDOWS:
+        base = {k: os.environ[k] for k in WINDOWS_BASE_ENV_KEYS if k in os.environ}
+        base.setdefault("SYSTEMROOT", r"C:\Windows")
+        base.setdefault("COMSPEC", r"C:\Windows\System32\cmd.exe")
+        base["TEMP"] = tmp_dir
+        base["TMP"] = tmp_dir
+    else:
+        base = {k: os.environ[k] for k in POSIX_BASE_ENV_KEYS if k in os.environ}
+        base.setdefault("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+        base.setdefault("HOME", "/tmp")
+        base.setdefault("LANG", "en_US.UTF-8")
+        base["TMPDIR"] = tmp_dir
+
     allowed_extra, rejected = policy.check_env(extra_env or {})
     base.update(allowed_extra)
     return base, rejected
+
+
+def resolve_python_executable(argv: list[str]) -> list[str]:
+    """If argv[0] names a bare "python"/"python3" interpreter, substitute
+    sys.executable -- the literal name is never guaranteed to exist on
+    PATH (not on a minimal Windows runner, and not reliably as exactly
+    "python3" vs "python" across platforms either). Any other argv[0] is
+    left untouched: this only replaces what policy.classify's
+    AUTO_FILE_COMMANDS already recognises as a generic interpreter call.
+    """
+    if not argv:
+        return argv
+    if policy.normalize_command_name(argv[0]) in ("python", "python3"):
+        return [sys.executable, *argv[1:]]
+    return argv
 
 
 def _set_resource_limits(
@@ -113,12 +141,13 @@ def _set_resource_limits(
     nofile: int = DEFAULT_RLIMIT_NOFILE,
     fsize_bytes: int = DEFAULT_RLIMIT_FSIZE_BYTES,
 ):
-    """Returned as a preexec_fn: runs in the child after fork, before exec.
-    Sets what macOS actually enforces (CPU time, file descriptor count,
-    max file size). Does NOT attempt a memory rlimit -- see module docstring.
+    """Returned as a preexec_fn (POSIX only; never passed to Popen on
+    Windows). Runs in the child after fork, before exec. Sets what POSIX
+    actually enforces (CPU time, file descriptor count, max file size).
+    Does NOT attempt a memory rlimit -- see module docstring.
     """
     def _apply():
-        if resource is None:  # Windows; execute() should never reach here (see worker.py's platform guard)
+        if resource is None:  # defensive; _set_resource_limits is only used on POSIX
             return
         try:
             resource.setrlimit(resource.RLIMIT_CPU, (cpu_s, cpu_s))
@@ -141,15 +170,64 @@ def _set_resource_limits(
     return _apply
 
 
-def _kill_process_group(pgid: int, *, grace_s: float = SIGTERM_GRACE_S) -> None:
-    """POSIX-only (os.killpg, SIGKILL). Never called on Windows -- worker.py's
-    platform guard exits before any job reaches execute()."""
-    if not hasattr(os, "killpg"):
+def popen_job(argv: list[str], cwd: Path, env: dict) -> subprocess.Popen:
+    """Start argv as its own process group (POSIX) or process group leader
+    (Windows), ready for kill_process_tree to signal the whole tree later.
+    """
+    if IS_WINDOWS:
+        return subprocess.Popen(
+            argv,
+            cwd=str(cwd),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        )
+    return subprocess.Popen(
+        argv,
+        cwd=str(cwd),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,  # own process group; pgid == proc.pid
+        preexec_fn=_set_resource_limits(),
+    )
+
+
+def kill_process_tree(pid: int, *, grace_s: float = TERMINATE_GRACE_S) -> None:
+    """Kill pid and every descendant it has spawned, on any platform.
+
+    POSIX: os.killpg is the fast path (SIGTERM to the whole group, wait up
+    to grace_s, then SIGKILL) since it needs no extra dependency and
+    reliably reaches processes that re-parented after their parent exited,
+    as long as they stayed in the same process group.
+
+    Windows (and as a POSIX fallback if os.killpg is unavailable): walk the
+    process tree with psutil (children recursive), terminate() each, wait
+    up to grace_s, then kill() whatever is left. If psutil itself raises
+    something unexpected, fall back to `taskkill /T /F` on Windows as a
+    last resort.
+    """
+    if not IS_WINDOWS and hasattr(os, "killpg"):
+        _killpg_tree(pid, grace_s=grace_s)
         return
+
+    try:
+        _psutil_tree_kill(pid, grace_s=grace_s)
+    except Exception:
+        if IS_WINDOWS:
+            _taskkill_fallback(pid)
+
+
+def _killpg_tree(pgid: int, *, grace_s: float) -> None:
+    import signal
+
     try:
         os.killpg(pgid, signal.SIGTERM)
     except ProcessLookupError:
         return
+    except PermissionError:
+        pass
     deadline = time.monotonic() + grace_s
     while time.monotonic() < deadline:
         try:
@@ -159,9 +237,7 @@ def _kill_process_group(pgid: int, *, grace_s: float = SIGTERM_GRACE_S) -> None:
         except PermissionError:
             # pgid was reaped and reused by a process we can't signal; we
             # can no longer tell whether our job's group is still alive, so
-            # stop polling and fall through to the SIGKILL attempt below
-            # (also harmless against a pid we don't own: ProcessLookupError
-            # or PermissionError there is caught and ignored too).
+            # stop polling and fall through to the SIGKILL attempt below.
             break
         time.sleep(0.1)
     try:
@@ -170,12 +246,52 @@ def _kill_process_group(pgid: int, *, grace_s: float = SIGTERM_GRACE_S) -> None:
         pass
 
 
+def _psutil_tree_kill(pid: int, *, grace_s: float) -> None:
+    try:
+        root = psutil.Process(pid)
+    except psutil.NoSuchProcess:
+        return
+
+    procs = []
+    try:
+        procs = root.children(recursive=True)
+    except psutil.NoSuchProcess:
+        pass
+    procs.append(root)
+
+    for p in procs:
+        try:
+            p.terminate()
+        except psutil.NoSuchProcess:
+            pass
+
+    gone, alive = psutil.wait_procs(procs, timeout=grace_s)
+    for p in alive:
+        try:
+            p.kill()
+        except psutil.NoSuchProcess:
+            pass
+    if alive:
+        psutil.wait_procs(alive, timeout=2)
+
+
+def _taskkill_fallback(pid: int) -> None:
+    try:
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            capture_output=True,
+            timeout=10,
+        )
+    except Exception:
+        pass  # best effort; nothing more we can do
+
+
 class CancelRegistry:
-    """Thread-safe map of job_id -> (process group id, cancel event) for jobs
+    """Thread-safe map of job_id -> (process id, cancel event) for jobs
     currently executing. Lets the heartbeat loop's cancel_job_ids handling
-    (worker.py) kill a running job's process group from a different thread
+    (worker.py) kill a running job's process tree from a different thread
     than the one running execute() for that job: cancel() sets the event and
-    kills the group directly; execute()'s own watchdog thread for that job
+    kills the tree directly; execute()'s own watchdog thread for that job
     waits on the same event purely to label the result "cancelled" instead
     of "failed" once proc.wait() returns.
     """
@@ -184,11 +300,11 @@ class CancelRegistry:
         self._lock = threading.Lock()
         self._entries: dict[str, tuple[int, threading.Event]] = {}
 
-    def register(self, job_id: str, pgid: int) -> threading.Event:
+    def register(self, job_id: str, pid: int) -> threading.Event:
         event = threading.Event()
         if job_id is not None:
             with self._lock:
-                self._entries[job_id] = (pgid, event)
+                self._entries[job_id] = (pid, event)
         return event
 
     def unregister(self, job_id: str) -> None:
@@ -198,23 +314,22 @@ class CancelRegistry:
             self._entries.pop(job_id, None)
 
     def cancel(self, job_id: str) -> bool:
-        """Kill the process group for job_id if it is currently running.
+        """Kill the process tree for job_id if it is currently running.
         Returns True if a running job was found and killed, False otherwise
         (already finished, or never registered)."""
         with self._lock:
             entry = self._entries.get(job_id)
         if entry is None:
             return False
-        pgid, event = entry
+        pid, event = entry
         event.set()
-        _kill_process_group(pgid)
+        kill_process_tree(pid)
         return True
 
 
 def _group_rss_bytes(pid: int) -> int:
-    """Sum RSS across the process and all its descendants. Requires psutil;
-    callers must check psutil is not None first.
-    """
+    """Sum RSS across the process and all its descendants. Requires psutil
+    (a required dependency of this module)."""
     try:
         proc = psutil.Process(pid)
     except psutil.NoSuchProcess:
@@ -263,7 +378,7 @@ class _OutputCapture:
 
     def _read_loop(self) -> None:
         for raw_line in iter(self.pipe.readline, b""):
-            line = raw_line.decode("utf-8", errors="replace").rstrip("\n")
+            line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
             line = scrub_secrets(line)
             encoded_len = len(raw_line)
             if self.captured_bytes + encoded_len > self.max_bytes:
@@ -320,12 +435,15 @@ def execute(
     cancel_registry: "CancelRegistry | None" = None,
     job_id: str | None = None,
 ) -> dict:
-    """Run argv (a real list, never a shell string) in its own process group
-    under cwd/env, capturing output and enforcing timeout_s and (if psutil is
-    available) max_rss_bytes.
+    """Run argv (a real list, never a shell string) as its own process
+    tree under cwd/env, capturing output and enforcing timeout_s and
+    max_rss_bytes (via psutil, on every platform).
 
-    If cancel_registry is given, this job's process group is registered
-    under job_id for the duration of the run so a concurrent call to
+    "python"/"python3" as argv[0] are replaced with sys.executable (see
+    resolve_python_executable) before the process is started.
+
+    If cancel_registry is given, this job's process id is registered under
+    job_id for the duration of the run so a concurrent call to
     cancel_registry.cancel(job_id) (from the heartbeat loop, handling
     cancel_job_ids) can kill it; the registration is removed once the
     process exits, win or lose.
@@ -336,19 +454,12 @@ def execute(
     not know about `metrics`/`files` (results JSON) -- see run_job below.
     """
     on_log = on_log or (lambda chunks: None)
+    argv = resolve_python_executable(argv)
     seq_counter = [0]
     log_lock = threading.Lock()
 
     try:
-        proc = subprocess.Popen(
-            argv,
-            cwd=str(cwd),
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,  # own process group; pgid == proc.pid
-            preexec_fn=_set_resource_limits(),
-        )
+        proc = popen_job(argv, cwd, env)
     except (OSError, FileNotFoundError) as exc:
         return {
             "status": "failed",
@@ -357,10 +468,10 @@ def execute(
             "stderr_tail": f"failed to start process: {exc}",
         }
 
-    pgid = proc.pid
+    pid = proc.pid
     cancel_event = None
     if cancel_registry is not None and job_id is not None:
-        cancel_event = cancel_registry.register(job_id, pgid)
+        cancel_event = cancel_registry.register(job_id, pid)
 
     stdout_capture = _OutputCapture("stdout", proc.stdout, max_output_bytes, seq_counter, on_log, log_lock)
     stderr_capture = _OutputCapture("stderr", proc.stderr, max_output_bytes, seq_counter, on_log, log_lock)
@@ -370,30 +481,29 @@ def execute(
     timed_out = threading.Event()
     memory_exceeded = threading.Event()
     cancelled = threading.Event()
+    proc_finished = threading.Event()
 
     def _timeout_watchdog():
         if not proc_finished.wait(timeout_s):
             timed_out.set()
-            _kill_process_group(pgid)
+            kill_process_tree(pid)
 
     def _memory_watchdog():
-        if psutil is None:
-            return
         while not proc_finished.is_set():
             if proc_finished.wait(MEMORY_POLL_INTERVAL_S):
                 return
             try:
-                rss = _group_rss_bytes(pgid)
+                rss = _group_rss_bytes(pid)
             except Exception:
                 continue
             if rss > max_rss_bytes:
                 memory_exceeded.set()
-                _kill_process_group(pgid)
+                kill_process_tree(pid)
                 return
 
     def _cancel_watchdog():
         # cancel_registry.cancel() (called from the heartbeat thread) sets
-        # cancel_event and kills the process group itself; this thread's
+        # cancel_event and kills the process tree itself; this thread's
         # only job is to notice that happened so the result can be labelled
         # "cancelled" rather than "failed" once proc.wait() returns. Waits on
         # proc_finished too so it doesn't block past the process's own exit.
@@ -404,7 +514,6 @@ def execute(
                 cancelled.set()
                 return
 
-    proc_finished = threading.Event()
     timeout_thread = threading.Thread(target=_timeout_watchdog, daemon=True)
     memory_thread = threading.Thread(target=_memory_watchdog, daemon=True)
     cancel_thread = threading.Thread(target=_cancel_watchdog, daemon=True)
@@ -471,6 +580,104 @@ def _denied(reason: str) -> dict:
     }
 
 
+def _write_file_job(payload: dict, jail_root: Path) -> dict:
+    """read_file/list_dir/write_file are implemented directly in Python
+    rather than shelling out to cat/ls/mkdir (per the task spec: "do not
+    rely on ls, cat or mkdir existing as programs"). Cross-platform, and
+    does not need policy.normalize_argv or a subprocess at all.
+    """
+    path_rel = payload.get("path")
+    try:
+        target = policy.resolve_in_jail(path_rel, jail_root)
+    except policy.JailViolation as exc:
+        return _denied(str(exc))
+
+    content = payload.get("content")
+    if content is None:
+        return _denied("write_file requires a 'content' field (artifact_id is not yet supported)")
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        return {
+            "status": "failed",
+            "exit_code": None,
+            "stdout_tail": "",
+            "stderr_tail": f"write_file failed: {exc}",
+            "metrics": {},
+            "files": [],
+        }
+    return {
+        "status": "done",
+        "exit_code": 0,
+        "stdout_tail": "",
+        "stderr_tail": "",
+        "metrics": {},
+        "files": [],
+    }
+
+
+def _read_file_job(payload: dict, jail_root: Path) -> dict:
+    path_rel = payload.get("path")
+    try:
+        target = policy.resolve_in_jail(path_rel, jail_root)
+    except policy.JailViolation as exc:
+        return _denied(str(exc))
+
+    try:
+        text = target.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return {
+            "status": "failed",
+            "exit_code": None,
+            "stdout_tail": "",
+            "stderr_tail": f"read_file failed: {exc}",
+            "metrics": {},
+            "files": [],
+        }
+    return {
+        "status": "done",
+        "exit_code": 0,
+        "stdout_tail": text,
+        "stderr_tail": "",
+        "metrics": {},
+        "files": [],
+    }
+
+
+def _list_dir_job(payload: dict, jail_root: Path) -> dict:
+    path_rel = payload.get("path", ".")
+    try:
+        target = policy.resolve_in_jail(path_rel, jail_root)
+    except policy.JailViolation as exc:
+        return _denied(str(exc))
+
+    try:
+        entries = sorted(os.listdir(target))
+    except OSError as exc:
+        return {
+            "status": "failed",
+            "exit_code": None,
+            "stdout_tail": "",
+            "stderr_tail": f"list_dir failed: {exc}",
+            "metrics": {},
+            "files": [],
+        }
+    lines = []
+    for name in entries:
+        suffix = "/" if (target / name).is_dir() else ""
+        lines.append(name + suffix)
+    return {
+        "status": "done",
+        "exit_code": 0,
+        "stdout_tail": "\n".join(lines) + ("\n" if lines else ""),
+        "stderr_tail": "",
+        "metrics": {},
+        "files": [],
+    }
+
+
 def run_job(job: dict, workspace_root: Path, on_log=None, cancel_registry=None) -> dict:
     """Classify the job, run it if allowed, return the result shape
     worker.py's post_result expects: status, exit_code, stdout_tail,
@@ -485,8 +692,8 @@ def run_job(job: dict, workspace_root: Path, on_log=None, cancel_registry=None) 
     WORKSPACE_ROOT itself. project_id is validated before use (empty,
     absolute, '..' or a path separator are all rejected).
 
-    `cancel_registry`, if given, is a CancelRegistry (see below) that this
-    call registers its live subprocess's pgid into for the duration of the
+    `cancel_registry`, if given, is a CancelRegistry (see above) that this
+    call registers its live subprocess's pid into for the duration of the
     run, so a concurrent cancel request (from the heartbeat loop) can find
     and kill it.
     """
@@ -505,6 +712,15 @@ def run_job(job: dict, workspace_root: Path, on_log=None, cancel_registry=None) 
 
     job_type = job.get("type", "")
     payload = job.get("payload", {}) or {}
+
+    # read_file/list_dir/write_file are implemented in Python, not by
+    # shelling out, so they're handled before the argv-based path below.
+    if job_type == "write_file":
+        return _write_file_job(payload, jail_root)
+    if job_type == "read_file":
+        return _read_file_job(payload, jail_root)
+    if job_type == "list_dir":
+        return _list_dir_job(payload, jail_root)
 
     argv = policy.normalize_argv(job_type, payload)
     if not argv:

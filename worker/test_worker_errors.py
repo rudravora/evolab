@@ -1,6 +1,6 @@
 """Tests for worker.py's HTTP error handling (connection errors/429/5xx
 retry with backoff; 401/403 stop and exit; other 4xx on a job call fails
-just that job) and the Windows platform guard.
+just that job) and cross-platform signal handling.
 
 Run: python worker/test_worker_errors.py
 """
@@ -294,70 +294,41 @@ def test_5xx_retries_then_succeeds() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 6. Platform guard: simulated Windows exits with the exact message
+# 6. Cross-platform support: the worker runs on Windows, not just POSIX.
+#    install_signal_handlers must not raise on any platform's signal module,
+#    and SIGBREAK is registered when (and only when) it exists.
 # ---------------------------------------------------------------------------
 
-def test_platform_guard_exits_on_windows() -> None:
-    original_platform = sys.platform
-    try:
-        sys.platform = "win32"
-        exited = False
-        message = None
-        try:
-            import io
-            captured = io.StringIO()
-            old_stderr = sys.stderr
-            sys.stderr = captured
-            try:
-                worker_module.check_platform()
-            finally:
-                sys.stderr = old_stderr
-            message = captured.getvalue()
-        except SystemExit as exc:
-            exited = True
-            check("platform_guard.exit_code_nonzero", exc.code != 0, exc.code)
-        check("platform_guard.exits", exited, "check_platform() did not call sys.exit on win32")
-    finally:
-        sys.platform = original_platform
-
-
-def test_platform_guard_message_exact() -> None:
-    original_platform = sys.platform
-    try:
-        sys.platform = "win32"
-        import io
-
-        captured = io.StringIO()
-        old_stderr = sys.stderr
-        sys.stderr = captured
-        try:
-            worker_module.check_platform()
-        except SystemExit:
+def test_install_signal_handlers_does_not_raise() -> None:
+    class FakeWorker:
+        def request_shutdown(self, *_args):
             pass
-        finally:
-            sys.stderr = old_stderr
-        message = captured.getvalue().strip()
-        check(
-            "platform_guard.exact_message",
-            message == "Worker supports macOS and Linux only. On Windows use WSL.",
-            repr(message),
-        )
+
+    try:
+        worker_module.install_signal_handlers(FakeWorker())
+        check("signal_handlers.installs_without_raising", True)
+    except Exception as exc:
+        check("signal_handlers.installs_without_raising", False, str(exc))
+
+
+def test_install_signal_handlers_registers_sigbreak_if_present() -> None:
+    import signal
+
+    if not hasattr(signal, "SIGBREAK"):
+        check("signal_handlers.sigbreak_skip_noted", True, "no SIGBREAK on this platform; nothing to verify here")
+        return
+
+    class FakeWorker:
+        def request_shutdown(self, *_args):
+            pass
+
+    original_handler = signal.getsignal(signal.SIGBREAK)
+    try:
+        worker_module.install_signal_handlers(FakeWorker())
+        new_handler = signal.getsignal(signal.SIGBREAK)
+        check("signal_handlers.sigbreak_registered", new_handler is not None, new_handler)
     finally:
-        sys.platform = original_platform
-
-
-def test_platform_guard_does_not_exit_on_macos_linux() -> None:
-    for plat in ("darwin", "linux"):
-        original_platform = sys.platform
-        try:
-            sys.platform = plat
-            try:
-                worker_module.check_platform()
-                check(f"platform_guard.no_exit_on_{plat}", True)
-            except SystemExit:
-                check(f"platform_guard.no_exit_on_{plat}", False, f"check_platform() exited on {plat!r}")
-        finally:
-            sys.platform = original_platform
+        signal.signal(signal.SIGBREAK, original_handler)
 
 
 # ---------------------------------------------------------------------------
@@ -398,9 +369,8 @@ def main() -> None:
         test_connection_refused_then_recovers,
         test_422_on_job_result_fails_job_not_worker,
         test_5xx_retries_then_succeeds,
-        test_platform_guard_exits_on_windows,
-        test_platform_guard_message_exact,
-        test_platform_guard_does_not_exit_on_macos_linux,
+        test_install_signal_handlers_does_not_raise,
+        test_install_signal_handlers_registers_sigbreak_if_present,
         test_runner_import_survives_missing_resource_module,
     ]
     for t in tests:

@@ -101,14 +101,19 @@ def test_child_processes_killed() -> None:
     ws = make_workspace()
     marker = ws / "child_alive.txt"
     # Parent spawns a detached-looking child (still in the same process
-    # group unless it calls setsid itself) that would touch `marker` every
-    # 0.2s forever if still running after the timeout.
+    # group/tree unless it calls setsid itself) that would touch `marker`
+    # every 0.2s forever if still running after the timeout. Uses
+    # sys.executable (via the same mechanism the job's own argv gets --
+    # resolve_python_executable only rewrites the *outer* job's argv, not a
+    # subprocess call the job's own script makes, so this script must name
+    # its own interpreter explicitly rather than relying on a bare
+    # "python3" existing on PATH, which Windows runners do not guarantee).
     write_script(
         ws,
         "spawner.py",
         f"""
-import subprocess, time
-p = subprocess.Popen(["python3", "-c",
+import subprocess, sys, time
+p = subprocess.Popen([sys.executable, "-c",
     "import time; f=open({str(marker)!r}, 'a');"
     "[ (f.write('x'), f.flush(), time.sleep(0.2)) for _ in iter(int, 1) ]"
 ])
@@ -434,6 +439,158 @@ def test_cancel_nonexistent_job_is_noop() -> None:
     check("cancel.nonexistent_job_returns_false", killed is False, killed)
 
 
+# ---------------------------------------------------------------------------
+# 11. write_file / read_file / list_dir: implemented in Python, not by
+#     shelling out to cat/ls/mkdir (cross-platform; those programs may not
+#     exist, e.g. on a minimal Windows runner).
+# ---------------------------------------------------------------------------
+
+def test_write_file_job_writes_inside_jail() -> None:
+    ws = make_workspace()
+    j = job("write_file", {"path": "code/out.txt", "content": "hello from write_file\n"})
+    result = runner.run_job(j, ws)
+    check("write_file.status_done", result["status"] == "done", result)
+    written = ws / PROJECT_ID / "code" / "out.txt"
+    check("write_file.content_correct", written.exists() and written.read_text() == "hello from write_file\n", result)
+    shutil.rmtree(ws, ignore_errors=True)
+
+
+def test_write_file_job_rejects_escape() -> None:
+    ws = make_workspace()
+    j = job("write_file", {"path": "../../etc/evil.txt", "content": "x"})
+    result = runner.run_job(j, ws)
+    check("write_file.escape_rejected", result["status"] == "failed" and "policy_denied" in result["stderr_tail"], result)
+    shutil.rmtree(ws, ignore_errors=True)
+
+
+def test_read_file_job_reads_inside_jail() -> None:
+    ws = make_workspace()
+    write_script(ws, "data.txt", "some file contents\n")
+    j = job("read_file", {"path": "code/data.txt"})
+    result = runner.run_job(j, ws)
+    check("read_file.status_done", result["status"] == "done", result)
+    check("read_file.content_correct", result["stdout_tail"] == "some file contents\n", result)
+    shutil.rmtree(ws, ignore_errors=True)
+
+
+def test_read_file_job_missing_file_fails_cleanly() -> None:
+    ws = make_workspace()
+    j = job("read_file", {"path": "code/does_not_exist.txt"})
+    result = runner.run_job(j, ws)
+    check("read_file.missing_file_failed", result["status"] == "failed", result)
+    shutil.rmtree(ws, ignore_errors=True)
+
+
+def test_list_dir_job_lists_inside_jail() -> None:
+    ws = make_workspace()
+    write_script(ws, "a.txt", "")
+    write_script(ws, "b.txt", "")
+    (ws / PROJECT_ID / "code" / "subdir").mkdir()
+    j = job("list_dir", {"path": "code"})
+    result = runner.run_job(j, ws)
+    check("list_dir.status_done", result["status"] == "done", result)
+    lines = result["stdout_tail"].splitlines()
+    check("list_dir.lists_files", "a.txt" in lines and "b.txt" in lines, lines)
+    check("list_dir.marks_directory", "subdir/" in lines, lines)
+    shutil.rmtree(ws, ignore_errors=True)
+
+
+def test_list_dir_job_rejects_escape() -> None:
+    ws = make_workspace()
+    j = job("list_dir", {"path": "../.."})
+    result = runner.run_job(j, ws)
+    check("list_dir.escape_rejected", result["status"] == "failed" and "policy_denied" in result["stderr_tail"], result)
+    shutil.rmtree(ws, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# 12. "python"/"python3" argv[0] is replaced with sys.executable, never run
+#     as a literal PATH lookup.
+# ---------------------------------------------------------------------------
+
+def test_resolve_python_executable_substitutes_sys_executable() -> None:
+    result = runner.resolve_python_executable(["python", "script.py", "--flag"])
+    check("python_exec.substituted", result[0] == sys.executable, result)
+    check("python_exec.rest_preserved", result[1:] == ["script.py", "--flag"], result)
+
+    result3 = runner.resolve_python_executable(["python3", "script.py"])
+    check("python_exec.python3_substituted", result3[0] == sys.executable, result3)
+
+    result_other = runner.resolve_python_executable(["ls", "-la"])
+    check("python_exec.non_python_untouched", result_other == ["ls", "-la"], result_other)
+
+
+def test_python_script_job_actually_uses_sys_executable() -> None:
+    """End-to-end: a job whose argv names the literal 'python' still runs
+    correctly even if that exact name resolves to a different interpreter
+    (or nothing) on PATH, because execute() substitutes sys.executable.
+    """
+    ws = make_workspace()
+    write_script(ws, "print_exe.py", "import sys; print(sys.executable)\n")
+    j = job("python_script", {"argv": ["python", "print_exe.py"], "cwd": "code"})
+    result, logs, _ = run(j, ws)
+    check("python_exec.job_succeeded", result["status"] == "done", result)
+    full_text = result["stdout_tail"] + " " + " ".join(c["text"] for c in logs)
+    check("python_exec.printed_sys_executable", sys.executable in full_text, (sys.executable, full_text))
+    shutil.rmtree(ws, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# 13. kill_process_tree: platform dispatch sanity (full behavior already
+#     covered by test_cancel_running_job and test_child_processes_killed on
+#     this platform; this just checks the function doesn't blow up on a
+#     pid that no longer exists).
+# ---------------------------------------------------------------------------
+
+def test_kill_process_tree_on_dead_pid_does_not_raise() -> None:
+    import subprocess as sp
+
+    proc = sp.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    try:
+        runner.kill_process_tree(proc.pid)
+        check("kill_tree.dead_pid_no_raise", True)
+    except Exception as exc:
+        check("kill_tree.dead_pid_no_raise", False, str(exc))
+
+
+# ---------------------------------------------------------------------------
+# 14. build_clean_env: simulated-Windows branch (IS_WINDOWS monkeypatched),
+#     since this suite normally runs on whatever OS it's invoked on and the
+#     real Windows branch otherwise only gets exercised on a Windows runner.
+# ---------------------------------------------------------------------------
+
+def test_build_clean_env_simulated_windows() -> None:
+    ws = make_workspace()
+    original = runner.IS_WINDOWS
+    try:
+        runner.IS_WINDOWS = True
+        env, rejected = runner.build_clean_env(ws, {"FOO": "bar", "GIT_SSH_COMMAND": "evil"})
+        check("clean_env_windows.has_path", "PATH" in env, env)
+        check("clean_env_windows.has_systemroot", "SYSTEMROOT" in env, env)
+        check("clean_env_windows.has_comspec", "COMSPEC" in env, env)
+        check("clean_env_windows.temp_is_workspace_local", env.get("TEMP", "").startswith(str(ws)), env)
+        check("clean_env_windows.tmp_is_workspace_local", env.get("TMP", "").startswith(str(ws)), env)
+        check("clean_env_windows.extra_key_passed", env.get("FOO") == "bar", env)
+        check("clean_env_windows.dangerous_key_rejected", "GIT_SSH_COMMAND" in rejected, rejected)
+        check("clean_env_windows.no_posix_only_keys", "HOME" not in env and "TMPDIR" not in env, env)
+    finally:
+        runner.IS_WINDOWS = original
+    shutil.rmtree(ws, ignore_errors=True)
+
+
+def test_build_clean_env_real_platform() -> None:
+    """Sanity check on whatever platform this test suite is actually
+    running on (POSIX here) -- not a simulation."""
+    ws = make_workspace()
+    env, rejected = runner.build_clean_env(ws, {})
+    if runner.IS_WINDOWS:
+        check("clean_env_real.windows_keys", "SYSTEMROOT" in env, env)
+    else:
+        check("clean_env_real.posix_keys", "HOME" in env and "TMPDIR" in env, env)
+    shutil.rmtree(ws, ignore_errors=True)
+
+
 def main() -> None:
     tests = [
         test_normal_script,
@@ -455,6 +612,17 @@ def main() -> None:
         test_approved_never_unlocks_deny,
         test_cancel_running_job,
         test_cancel_nonexistent_job_is_noop,
+        test_write_file_job_writes_inside_jail,
+        test_write_file_job_rejects_escape,
+        test_read_file_job_reads_inside_jail,
+        test_read_file_job_missing_file_fails_cleanly,
+        test_list_dir_job_lists_inside_jail,
+        test_list_dir_job_rejects_escape,
+        test_resolve_python_executable_substitutes_sys_executable,
+        test_python_script_job_actually_uses_sys_executable,
+        test_kill_process_tree_on_dead_pid_does_not_raise,
+        test_build_clean_env_simulated_windows,
+        test_build_clean_env_real_platform,
     ]
     for t in tests:
         print(f"running {t.__name__} ...")

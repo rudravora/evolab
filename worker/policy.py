@@ -1,8 +1,10 @@
 """Workspace jail and command policy (ARCHITECTURE.md section 6).
+Cross-platform: Windows, macOS and Linux.
 
 Two independent checks:
 - resolve_in_jail(path, root): is this path inside root, after resolving
-  symlinks and ".." segments?
+  symlinks and ".." segments (and, on Windows, drive letters, UNC paths,
+  reserved device names, trailing dots/spaces, and alternate data streams)?
 - classify(job): is this job auto-runnable, does it need approval, or is it
   denied outright? Independent of whatever `risk` tag the backend already put
   on the job at creation time — this is the worker's own second opinion,
@@ -11,11 +13,18 @@ Two independent checks:
 
 Deny always wins: a job the backend marked `approved` may run its
 needs_approval items, but a deny verdict never runs regardless of approval.
+
+Command names are matched case-insensitively with a .exe/.cmd/.bat/.ps1
+suffix stripped first, since Windows resolves "LS.EXE", "ls.exe" and "ls" to
+the same thing and command matching here must not depend on case or
+extension to stay meaningful across platforms.
 """
-import ipaddress
+import ntpath
 import os
+import posixpath
 import shlex
-from pathlib import Path
+import sys
+from pathlib import Path, PureWindowsPath
 from urllib.parse import urlparse
 
 HERE = Path(__file__).resolve().parent
@@ -35,13 +44,94 @@ CREDENTIAL_PATH_MARKERS = (
     ".env",
     "credentials",
 )
+# "python"/"python3" stay here for classify()'s auto-allow check (which only
+# looks at the command *name*, never spawns anything itself); the runner is
+# what actually execs a process, and it substitutes sys.executable for any
+# of these names rather than relying on a literal "python"/"python3" being
+# on PATH (see runner.py's resolve_python_executable).
 AUTO_FILE_COMMANDS = {"python", "python3", "ls", "mkdir", "cat"}
+EXECUTABLE_SUFFIXES = (".exe", ".cmd", ".bat", ".ps1", ".com")
 
 DEFAULT_MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024  # 200 MiB; caller may override
+
+# Windows reserved device names (case-insensitive, with or without an
+# extension -- "con", "con.txt" and "CON" are all reserved).
+WINDOWS_RESERVED_NAMES = {
+    "con",
+    "prn",
+    "aux",
+    "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
+
+
+def normalize_command_name(raw: str) -> str:
+    """Lowercase, with a known executable suffix stripped, so "LS.EXE",
+    "ls.exe" and "ls" all compare equal to the policy lists below.
+    """
+    name = os.path.basename(raw.replace("\\", "/")) if raw else ""
+    lowered = name.lower()
+    for suffix in EXECUTABLE_SUFFIXES:
+        if lowered.endswith(suffix):
+            lowered = lowered[: -len(suffix)]
+            break
+    return lowered
 
 
 class JailViolation(Exception):
     pass
+
+
+def check_windows_path_safety(path: str) -> None:
+    """Pure-logic Windows path checks, callable and testable on any host OS
+    via ntpath/PureWindowsPath (so the test suite can exercise every rule
+    from macOS or Linux CI, without a real Windows filesystem). Only
+    *enforced* as part of resolve_in_jail when os.name == "nt" -- a literal
+    ":" or trailing space in a filename is perfectly legal on POSIX and must
+    not be rejected there.
+
+    Raises JailViolation for any of:
+    - a drive letter (e.g. "C:\\x" or "C:x")
+    - a UNC path (e.g. "\\\\server\\share\\x")
+    - a reserved device name in any segment (CON, PRN, AUX, NUL, COM1-9,
+      LPT1-9 -- case-insensitive, with or without an extension)
+    - a segment ending in a trailing dot or space (Windows silently strips
+      these, which can make two different-looking paths collide)
+    - an alternate data stream marker: a ':' after the first character of a
+      segment (a bare drive-letter colon like "C:" is covered by the drive
+      check above, not this one)
+    """
+    if not path:
+        return
+
+    win_path = PureWindowsPath(path)
+    if win_path.drive:
+        if win_path.drive.startswith("\\\\") or win_path.drive.startswith("//"):
+            raise JailViolation(f"UNC paths are not allowed: {path!r}")
+        raise JailViolation(f"drive letters are not allowed: {path!r}")
+
+    # PureWindowsPath treats a leading "\\\\" specially; ntpath.splitdrive
+    # catches UNC roots PureWindowsPath's .drive sometimes leaves on .root.
+    drive, _ = ntpath.splitdrive(path)
+    if drive:
+        raise JailViolation(f"drive letters are not allowed: {path!r}")
+    if path.startswith("\\\\") or path.startswith("//"):
+        raise JailViolation(f"UNC paths are not allowed: {path!r}")
+
+    for part in win_path.parts:
+        if part in ("\\", "/", ".", ".."):
+            continue  # "." / ".." are path navigation, not filenames -- not subject to the Windows filename rules below
+        stem = part.split(".")[0] if "." in part else part
+        if stem.lower() in WINDOWS_RESERVED_NAMES:
+            raise JailViolation(f"path segment {part!r} is a reserved Windows device name: {path!r}")
+        if part != part.rstrip(". "):
+            raise JailViolation(f"path segment {part!r} has a trailing dot or space: {path!r}")
+        # Alternate data stream: a ':' anywhere after the first character of
+        # the segment (a segment literally equal to ":" or starting with it
+        # is already nonsensical and caught by the ADS check too).
+        if ":" in part:
+            raise JailViolation(f"path segment {part!r} contains ':' (alternate data stream syntax): {path!r}")
 
 
 def resolve_in_jail(path: str | os.PathLike, root: str | os.PathLike) -> Path:
@@ -52,12 +142,19 @@ def resolve_in_jail(path: str | os.PathLike, root: str | os.PathLike) -> Path:
     - absolute paths outside root
     - literal ".." segments
     - symlinks (anywhere in the chain) that resolve outside root
+    - on Windows only: drive letters, UNC paths, reserved device names,
+      trailing dots/spaces in a segment, and alternate data streams (see
+      check_windows_path_safety)
 
     Uses os.path.realpath so this catches symlink escapes even for paths that
     don't exist yet (realpath resolves the existing prefix and leaves the
     rest literal, which is sufficient: an attacker needs an existing symlink
     somewhere in the chain to escape, and that symlink gets resolved).
     """
+    path_str = os.fspath(path)
+    if os.name == "nt":
+        check_windows_path_safety(path_str)
+
     root_real = Path(os.path.realpath(root))
     raw = Path(path)
 
@@ -69,7 +166,9 @@ def resolve_in_jail(path: str | os.PathLike, root: str | os.PathLike) -> Path:
     resolved = Path(os.path.realpath(candidate))
 
     try:
-        resolved.relative_to(root_real)
+        resolved_cmp = Path(os.path.normcase(str(resolved)))
+        root_cmp = Path(os.path.normcase(str(root_real)))
+        resolved_cmp.relative_to(root_cmp)
     except ValueError:
         raise JailViolation(f"path escapes jail root: {path!r} -> {resolved}")
 
@@ -143,7 +242,7 @@ def _looks_like_pip_extra_index(argv: list[str], payload: dict) -> bool:
 def _is_delete_argv(argv: list[str]) -> bool:
     if not argv:
         return False
-    cmd = os.path.basename(argv[0])
+    cmd = normalize_command_name(argv[0])
     if cmd in DELETE_COMMANDS:
         return True
     # `find ... -delete`, `git clean -fd` style deletes hidden in flags
@@ -173,12 +272,12 @@ def _has_shell_pipe_to_interpreter(argv: list[str]) -> bool:
     """
     if not argv:
         return False
-    cmd = os.path.basename(argv[0])
+    cmd = normalize_command_name(argv[0])
     if cmd in SHELL_PIPE_TARGETS:
         return True
     for i, tok in enumerate(argv):
         if tok == "|" and i + 1 < len(argv):
-            nxt = os.path.basename(argv[i + 1])
+            nxt = normalize_command_name(argv[i + 1])
             if nxt in SHELL_PIPE_TARGETS:
                 return True
     return False
@@ -191,7 +290,7 @@ def _python_c_runs_shell(argv: list[str]) -> bool:
     """
     if not argv:
         return False
-    cmd = os.path.basename(argv[0])
+    cmd = normalize_command_name(argv[0])
     if cmd not in ("python", "python3"):
         return False
     if "-c" not in argv:
@@ -216,7 +315,7 @@ def _git_injects_config(argv: list[str]) -> bool:
     """`git -c core.sshCommand=... ...` or `-c` with any key that can run an
     external command (sshCommand, pager, core.editor, alias.*, http.proxy).
     """
-    if not argv or os.path.basename(argv[0]) != "git":
+    if not argv or normalize_command_name(argv[0]) != "git":
         return False
     dangerous_keys = ("sshcommand", "core.editor", "pager", "http.proxy", "credential.helper")
     for i, tok in enumerate(argv):
@@ -273,14 +372,26 @@ def check_env(env: dict) -> tuple[dict, list[str]]:
     that can redirect command execution, interpreter import paths, package
     index resolution, or that look like a credential by naming convention.
 
+    All matching is case-insensitive (Windows env var names are
+    case-insensitive -- "Path" and "PATH" are the same variable there), so
+    this also rejects a key whose only problem is differing in case from an
+    already-rejected or already-seen key, and treats two input keys that
+    differ only in case as a collision (the later one is rejected, since
+    silently letting one clobber the other at the OS level would be an easy
+    way to smuggle a value past a check keyed on the first spelling).
+
     Does not decide what the clean base environment is (PATH, HOME, TMPDIR,
     LANG) -- that is runner.py's job; this only filters the extra keys a job
     payload asks to add.
     """
     allowed = {}
     rejected = []
+    seen_upper: set[str] = set()
     for key, value in (env or {}).items():
         upper = key.upper()
+        if upper in seen_upper:
+            rejected.append(key)
+            continue
         if upper in DENY_ENV_KEYS:
             rejected.append(key)
             continue
@@ -290,6 +401,7 @@ def check_env(env: dict) -> tuple[dict, list[str]]:
         if any(upper.endswith(s) for s in DENY_ENV_SUFFIXES):
             rejected.append(key)
             continue
+        seen_upper.add(upper)
         allowed[key] = value
     return allowed, rejected
 
@@ -313,7 +425,7 @@ def classify(job: dict, *, allowed_packages=None, allowed_domains=None, max_down
 
     # --- Deny checks (apply regardless of job type, and regardless of approval) ---
     if argv:
-        cmd = os.path.basename(argv[0]) if argv else ""
+        cmd = normalize_command_name(argv[0]) if argv else ""
         if cmd in DENY_COMMANDS:
             return "deny", f"denied command: {cmd}"
         if _has_shell_pipe_to_interpreter(argv):
@@ -393,7 +505,7 @@ def classify(job: dict, *, allowed_packages=None, allowed_domains=None, max_down
         return "auto", "all packages on the allowlist"
 
     if job_type in ("shell", "python_script") and argv:
-        cmd = os.path.basename(argv[0])
+        cmd = normalize_command_name(argv[0])
         if cmd in AUTO_FILE_COMMANDS:
             return "auto", f"{cmd} inside the jail"
         return "needs_approval", f"command not on the auto allowlist: {cmd!r}"

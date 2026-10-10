@@ -3,6 +3,10 @@
 API.md section 9 is the contract. ARCHITECTURE.md sections 3.1 (pairing),
 3.2 (job lifecycle) and 6 (safety) govern behaviour.
 
+Cross-platform: Windows, macOS and Linux. psutil is a required dependency
+(not optional) because runner.py's memory limit and process-tree kill rely
+on it on every platform.
+
 Run:
     BACKEND_URL=http://localhost:8000 PAIRING_CODE=ABCD-1234 \
         WORKSPACE_ROOT=./workspace MAX_JOBS=2 python worker.py
@@ -19,15 +23,11 @@ import threading
 import time
 from pathlib import Path
 
+import psutil
 import requests
 
 import policy
 import runner
-
-try:
-    import psutil
-except ImportError:
-    psutil = None
 
 TOKEN_PATH = Path(__file__).resolve().parent / ".worker_token"
 API_PREFIX = "/api/v1"
@@ -90,10 +90,17 @@ def load_config() -> dict:
 
 def save_token(token: str) -> None:
     TOKEN_PATH.write_text(token)
-    try:
-        os.chmod(TOKEN_PATH, 0o600)
-    except OSError:
-        pass  # best-effort; not all filesystems support chmod (e.g. some Windows setups)
+    if os.name != "nt":
+        try:
+            os.chmod(TOKEN_PATH, 0o600)
+        except OSError:
+            pass  # best-effort
+    # On Windows, chmod's POSIX permission bits don't model NTFS ACLs, so we
+    # skip it entirely rather than call something that wouldn't do what the
+    # comment implies. The token file lives in this worker.py's own
+    # directory, i.e. wherever the user checked out/cloned the worker --
+    # typically under their user profile (e.g. C:\Users\<name>\...\worker\),
+    # which is already private to that Windows user account by default.
 
 
 def load_token() -> str | None:
@@ -202,7 +209,7 @@ class Worker:
 
         capabilities = {
             "cpu_cores": os.cpu_count() or 1,
-            "ram_gb": round(psutil.virtual_memory().total / 1e9, 1) if psutil else 0,
+            "ram_gb": round(psutil.virtual_memory().total / 1e9, 1),
             "gpu": False,
             "python": f"{sys.version_info.major}.{sys.version_info.minor}",
         }
@@ -236,8 +243,6 @@ class Worker:
         print(f"registered worker_id={self.worker_id}")
 
     def _cpu_ram_pct(self) -> tuple[float, float]:
-        if psutil is None:
-            return 0.0, 0.0
         try:
             return psutil.cpu_percent(interval=None), psutil.virtual_memory().percent
         except Exception:
@@ -469,31 +474,39 @@ class Worker:
                 self.running_jobs.pop(job_id, None)
 
 
-def check_platform() -> None:
-    """ARCHITECTURE.md section 6 / task spec: macOS and Linux only. Exit
-    immediately and clearly on Windows rather than failing deep inside a job
-    run on a POSIX-only call (os.killpg, resource limits, ...)."""
-    if sys.platform.startswith("win"):
-        print("Worker supports macOS and Linux only. On Windows use WSL.", file=sys.stderr)
-        sys.exit(1)
+def install_signal_handlers(worker: "Worker") -> None:
+    """SIGINT and SIGTERM everywhere they exist; SIGBREAK too on Windows
+    (sent for Ctrl+Break there, where SIGTERM doesn't exist as a signal a
+    process can catch). KeyboardInterrupt is also caught in main() directly,
+    since Windows consoles deliver Ctrl+C that way even when a SIGINT
+    handler is installed, depending on how the process was started.
+    """
+    signal.signal(signal.SIGINT, worker.request_shutdown)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, worker.request_shutdown)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, worker.request_shutdown)
 
 
 def main() -> None:
-    check_platform()
-
     config = load_config()
     worker = Worker(config)
     worker.register()
     if worker.token is None:
         return  # stop_event set during backoff before completing registration
 
-    signal.signal(signal.SIGINT, worker.request_shutdown)
-    signal.signal(signal.SIGTERM, worker.request_shutdown)
+    install_signal_handlers(worker)
 
     heartbeat_thread = threading.Thread(target=worker.heartbeat_loop, daemon=True)
     heartbeat_thread.start()
 
-    worker.poll_loop()
+    try:
+        worker.poll_loop()
+    except KeyboardInterrupt:
+        # Some Windows console configurations deliver Ctrl+C as a raised
+        # KeyboardInterrupt rather than (or in addition to) a caught SIGINT;
+        # handle both paths the same way.
+        worker.request_shutdown()
     worker.report_cancelled_jobs()
 
     if worker.auth_error is not None:
