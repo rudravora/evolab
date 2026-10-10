@@ -1,0 +1,4 @@
+# Dummy paper used only to test the harness end to end. Not a real paper.
+n_samples: 200
+n_features: 2
+noise_std: 0.1

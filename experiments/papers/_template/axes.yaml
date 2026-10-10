@@ -1,0 +1,17 @@
+# What-if axes: each key is a config field the Experiment Designer may vary;
+# each value is the list of values worth trying (CONTEXT.md section 5's
+# "What-ifs" list -- noise level, training-set size, grid size, etc. -- is
+# the model for what belongs here, paper-specific).
+#
+# This file is read by hand or by future tooling to generate a sweep of
+# --task/--method/config combinations; the harness itself does not read it
+# (one run = one `python -m experiments.harness.run` call with one config).
+
+example_hyperparameter:
+  - 0.5
+  - 1.0
+  - 2.0
+
+noise_level:
+  - 0.0
+  - 0.1

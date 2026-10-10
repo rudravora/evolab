@@ -1,0 +1,3 @@
+# Not a real paper -- this is the harness's own end-to-end test fixture.
+# Kept here only to match the directory shape other papers use.
+claims: []
