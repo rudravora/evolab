@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+.DS_Store
+workspace/
+worker/.worker_token
+*.db
+.claude/settings.local.json
+
+# Cached baseline results must be committed — do not ignore.
+!experiments/results/baseline/

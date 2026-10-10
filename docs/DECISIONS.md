@@ -1,0 +1,33 @@
+# DECISIONS
+
+One row per decision. Never delete; supersede with a new row that references the old id. Status: `agreed` (team confirmed), `proposed` (from the planning session, needs team confirmation), `superseded`.
+
+| ID | Date | Decision | Why | Alternatives considered | Status |
+|---|---|---|---|---|---|
+| D-001 | 2026-10-10 | Demo paper is **KAN (Liu et al., 2024)** with `pykan`; compare against parameter-matched MLPs | Small, CPU-feasible, has an official repo, clear claim, rich what-ifs, honest partial-reproduction story | CGCNN, TabPFN, grokking | agreed (Rudra) |
+| D-002 | 2026-10-10 | A **partial reproduction with explained differences is acceptable**; do not tune results to match the paper | PS-03 asks to explain where and why results differ; honesty scores better than a forced match | Force-match numbers | proposed |
+| D-003 | 2026-10-10 | **Web control plane plus pull-based workers.** Backend never connects to the laptop; workers poll outward | NAT-safe, same worker runs on laptop or Colab, works from college Wi-Fi | Push via SSH or tunnels (ngrok) | proposed |
+| D-004 | 2026-10-10 | **Agents run in the backend** as LLM loops; the worker only executes jobs | Keys stay off the laptop; agents survive laptop sleep; one DB holds all state for the UI | Agents on the worker | proposed |
+| D-005 | 2026-10-10 | Agents are **data rows** (prompt, tools, model, version) run by one generic loop | Spawning, merging and retiring become trivial and visible | One class per agent; heavy frameworks (LangGraph, CrewAI) | proposed |
+| D-006 | 2026-10-10 | A task that creates a job is **suspended** and resumed on result | No open LLM call during long runs; restart-safe | Blocking waits | proposed |
+| D-007 | 2026-10-10 | **Evolution is text-level only** (prompts, tools, routing, memory). No model training | Feasible on free compute; judges can inspect diffs | RL or fine-tuning | proposed |
+| D-008 | 2026-10-10 | Reward: `R = 0.6*O + 0.2*(1-C) + 0.2*F` with per-role outcome checks | Matches PS-03 (outcome, cost, feedback); simple and explainable | Learned reward | proposed |
+| D-009 | 2026-10-10 | Evolution triggers are deterministic; every evolution action goes through an `evolution` **approval** | Bounded risk; keeps the researcher in control | Fully automatic | proposed |
+| D-010 | 2026-10-10 | Roster: 9 LLM agents plus 3 services (Executor, Ledger, Librarian); Scout merged into Paper Analyst; Env and Data merged; Evaluator not evolvable | Fits 24 hours and free-tier rate limits; Evaluator should not grade itself | 14 LLM agents | proposed |
+| D-011 | 2026-10-10 | Ledger is a **table written at change time** by whichever agent changes something | Accurate "why we differ" evidence; no after-the-fact reconstruction | Separate ledger LLM agent | proposed |
+| D-012 | 2026-10-10 | Memory: SQLite plus FTS5, optional small embeddings; write only verified lessons; label `seeded` vs `learned` | Cheap, inspectable, honest | Vector DB service | proposed |
+| D-013 | 2026-10-10 | First worker: **local laptop started with one command**; Colab later; Kaggle out of scope | Fastest to build and demo | Colab first | agreed (Rudra) |
+| D-014 | 2026-10-10 | LLM: **free tier**, provider-agnostic wrapper, strong model for Meta-Controller, Implementer, Debugger; concurrency cap 2 or 3 | Budget; rate limits bind before cost | Single provider hard-coded | agreed on free tier (Rudra); provider TBD |
+| D-015 | 2026-10-10 | Mode C (clean-room) is **stretch**, core KAN layer only; Mode A is P0 | 24-hour scope | Full dual-track | proposed |
+| D-016 | 2026-10-10 | **n8n for plumbing only** (phone approvals, alerts, paper discovery, report sync); never the core agent logic | Judges score the agent system | Build workflows in n8n | proposed |
+| D-017 | 2026-10-10 | **Voroa hosts backend and frontend**; heavy compute stays on workers; deploy early | Public URL and mobile access; UseShipReady scores the deployed app | Local-only demo | proposed |
+| D-018 | 2026-10-10 | Entry paths: **paper path complete (P0)**; question-only entry via "find candidate papers, user picks" (P1); dataset-only and repo-only (P2) | Demo needs a paper; PS-03 lists several input types | Paper mandatory | agreed (discussed with Rudra) |
+| D-019 | 2026-10-10 | Tech stack: FastAPI, SQLAlchemy, SQLite (Postgres if Voroa persists), React plus Vite plus TypeScript plus Tailwind, SSE | Speed and familiarity | Next.js, WebSockets | proposed |
+| D-020 | 2026-10-10 | UI is **chat plus panels** (agent team, experiment tree, logs, approvals); chat is not the whole interface | PS-03 explicitly rejects notebook-or-chat-only | Chat only | agreed (discussed with Rudra) |
+| D-021 | 2026-10-10 | Safety: workspace jail, command policy (auto, approval, deny), timeouts, clean subprocess env, keys only on backend, signed single-use approval tokens | Executing LLM-written code on a laptop; UseShipReady scoring | Trust the model | proposed |
+| D-022 | 2026-10-10 | Record a **fallback replay** of a successful run early; keep a local-only mode | Venue network and LLM limits can fail live | Live only | proposed |
+| D-023 | 2026-10-10 | **Team of 3 developers** (one frontend, two backend-side). Roles A (backend, agents, deploy), B (worker, experiments, n8n), C (frontend, mocks, demo). The separate integration and demo role is dropped and its duties are split | Matches actual team size | Four roles with a dedicated integrator | agreed (Rudra stated team size); role assignment of people TBD |
+| D-024 | 2026-10-10 | **Cut ladder** in PRD section 6a defines what to cut first when a gate slips; cuts must be recorded here and never shown as working | Three devs cannot build all P0 at full depth | Ad hoc cuts under pressure | proposed |
+| D-025 | 2026-10-10 | Duty split: A owns Voroa deploy, security hardening and UseShipReady scans; B owns n8n flows (after M2); C owns demo script, replay fallback and DEVLOG hygiene | Spreads the old integrator duties by module knowledge | One person as integrator | proposed |
+| D-026 | 2026-10-10 | **Staggered sleep plan**: never two people asleep in the middle stretch, never both owners of the job pipe offline; final deploy and integration only when at least two people are rested | With three people one absence is a third of capacity | Everyone sleeps at the same time | proposed |
+| D-027 | 2026-10-10 | Any replayed or pre-extracted fallback (replay mode, cached baseline, stored paper spec or audit) is **labelled as such in the UI and in the demo** | Honesty with judges; avoids passing cached output off as live | Unlabelled fallbacks | proposed |

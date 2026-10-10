@@ -1,0 +1,270 @@
+# ARCHITECTURE
+
+Version 0.1. Companion docs: [API.md](API.md), [AGENTS.md](AGENTS.md), [PRD.md](PRD.md).
+
+## 1. Principles
+
+1. **Agents think in the backend; workers act in the field.** Agents are LLM-call loops in the backend. Workers only run commands and report back.
+2. **Workers pull, never get pushed to.** Laptops are behind NAT; outbound HTTPS always works. Same worker script runs on a laptop or Colab.
+3. **One generic agent loop.** An agent is data (prompt, tools, model, version). Spawning is an INSERT; retiring is an UPDATE.
+4. **Suspend, never wait.** A task that creates a job is suspended; its loop resumes when the job result arrives. No LLM call is held open during a training run.
+5. **Everything is an event.** State changes append to `events`; the dashboard is a view over events plus current state.
+6. **Untrusted inputs.** Papers, web pages, READMEs, repos and uploaded datasets are data, never instructions.
+7. **Deterministic where possible.** Scheduling, stats, parsing, budgets, retries and evolution *triggers* are plain code. LLMs make judgements.
+8. **Text-level evolution only.** Prompts, tools, routing and memory change; model weights never do.
+
+## 2. Components
+
+```
+┌────────────────────────────── Frontend (browser / phone) ──────────────────────────────┐
+│  React app: Intake · Run page (agents, tree, logs, chat, approvals) · Agent detail ·   │
+│  Report · Memory · Workers.   REST + SSE                                               │
+└───────────────────────────────────────────┬────────────────────────────────────────────┘
+                                            │ HTTPS
+┌───────────────────────────────────────────▼────────────────────────────────────────────┐
+│ Backend (FastAPI)                                                                      │
+│  API layer ── auth, validation, rate limit                                             │
+│  Orchestrator ── run state machine, task graph, scheduler, budget enforcement          │
+│  Agent runtime ── generic loop, tool registry, LLM wrapper, suspend/resume             │
+│  Services ── Executor (job creation + policy), Ledger, Librarian (memory),             │
+│              Evolution engine (rewards, triggers), Approvals, Report builder           │
+│  Event bus ── DB events table + in-process pub/sub → SSE                               │
+│  Storage ── SQLite (dev) / Postgres (deploy), artifact files                           │
+└───────────────┬───────────────────────────────────────────────┬────────────────────────┘
+                │ jobs pulled over HTTPS                        │ webhooks (signed)
+        ┌───────▼────────┐                                ┌─────▼─────┐
+        │ Worker process │                                │    n8n    │
+        │ policy · jail  │                                │ phone I/O │
+        │ subprocess run │                                └───────────┘
+        └────────────────┘
+        External: LLM provider(s), arXiv, PyPI, dataset hosts (allowlisted)
+```
+
+### 2.1 Frontend
+React plus Vite plus TypeScript plus Tailwind (proposed; see DECISIONS). Talks only to the REST API and one SSE stream per run. No secrets in the frontend. Responsive from phone width.
+
+### 2.2 Backend
+Python FastAPI. Async. Runs the orchestrator and agent loops as background asyncio tasks. SQLAlchemy models. A single process is enough for the hackathon; keep code paths idempotent so a restart can resume.
+
+### 2.3 Worker
+Single Python file (`worker/worker.py`) with minimal dependencies (`requests`, optional `psutil`). Registers, heartbeats, claims jobs, runs them as subprocesses under the local policy, streams logs, uploads artifacts.
+
+### 2.4 Integrations
+- **LLM provider** via `llm.call(role, messages, tools)` wrapper; provider chosen by env var.
+- **n8n** receives outbound webhooks and calls the inbound decision hook.
+- **arXiv** (paper search and fetch) from the backend, not the worker.
+
+## 3. Key flows
+
+### 3.1 Worker pairing
+1. Dashboard `POST /workers/pairing` returns a one-time pairing code and a ready-made command.
+2. User runs `BACKEND_URL=... PAIRING_CODE=... python worker.py`.
+3. Worker `POST /worker/register` with the code; backend returns a long-lived **worker token** (stored hashed). The worker keeps it in a local file or env var.
+4. Worker heartbeats every 10 seconds; backend marks it offline after 30 seconds of silence.
+
+### 3.2 Job lifecycle
+```
+pending ──claim──▶ claimed ──start──▶ running ──┬──▶ done
+                                               ├──▶ failed
+                                               ├──▶ timed_out
+                                               └──▶ cancelled
+ pending/claimed/running ──worker offline too long──▶ pending (requeued, attempt+1, max 2 requeues)
+```
+- Claim is atomic (`UPDATE ... WHERE status='pending' ... RETURNING`), filtered by worker capability and owner.
+- A job created with `risk='high'` is created as `awaiting_approval` (not claimable) until an approval is `approved`.
+
+### 3.3 Agent task lifecycle and suspension
+```
+queued ─▶ running ─▶ waiting_for_job ─▶ running ─▶ done
+              │                            │
+              ├──▶ waiting_for_approval ───┘
+              └──▶ failed / cancelled
+```
+Loop pseudocode:
+```
+load task, agent_version, context (inputs, memory hits)
+while steps < max_steps and tokens < cap:
+    reply = llm.call(system=agent_version.prompt, messages=history, tools=allowed_tools)
+    store message
+    if reply.tool_call:
+        result = tools.run(reply.tool_call)          # backend tools run inline
+        if result.kind == "job_created":              # worker tools
+            task.status = waiting_for_job; persist history; return   # SUSPEND
+        history += result
+    else if reply.finish: validate output schema; task.status = done; return
+```
+On a job result, the orchestrator finds the waiting task, appends the tool result to its history, sets it `running`, and re-enters the loop.
+
+### 3.4 Run lifecycle
+```
+planning ─▶ awaiting_approval ─▶ running ─▶ done
+   │              │                 │  ├──▶ paused ─▶ running
+   │              └─ rejected ─▶ planning (re-plan with comment)
+   └──────────────────────────────── failed / cancelled
+```
+
+### 3.5 Branch lifecycle
+```
+proposed ─▶ awaiting_approval(optional) ─▶ queued ─▶ running ─▶ done ─▶ expanded | pruned
+                                                          └──▶ killed (by user)
+```
+A decision (`expanded` or `pruned`) always stores `decision_reason` and the evidence (metric deltas, seed variance).
+
+### 3.6 Approvals
+Types: `plan`, `expensive_run`, `risky_command`, `new_package`, `evolution`, `branch_expand`, `human_input`.
+Status: `pending`, `approved`, `rejected`, `edited`, `expired`. Approvals created from the dashboard, optionally mirrored to n8n for phone decision. Expired approvals default to *reject*.
+
+### 3.7 Evolution loop (after each completed task and each run)
+1. Compute reward per agent task (formula in AGENTS.md).
+2. Update rolling averages.
+3. Evolution engine (deterministic triggers) emits **candidates**: refine, spawn, merge, retire.
+4. For each candidate, the Meta-Controller (LLM) drafts the change (new prompt, new agent spec, merge plan).
+5. An `evolution` approval is created; on approval the change is applied (new `agent_versions` row, new `agents` row, status change) and an event is logged.
+6. A/B window: a refined version is tried for the next 2 tasks; if mean reward is lower than the previous version, roll back automatically.
+
+### 3.8 Memory
+- **Write:** only verified lessons (the fix was re-run and passed). Dedupe by `signature`; increment `success_count` or `fail_count`.
+- **Read:** before an agent starts a task the Librarian returns up to 3 entries: exact signature, then FTS5 keyword, then optional embedding similarity; ranked by `similarity * success_rate * recency`.
+- **Feedback:** after the task, record whether retrieved entries helped.
+- **Labels:** `source` is `seeded` or `learned`. UI shows the label.
+
+## 4. Data model
+
+SQLite for development; Postgres for deployment if Voroa provides persistence (VERIFY). IDs are text (UUID or ULID). Timestamps are UTC ISO strings. JSON columns are validated at the API layer.
+
+```sql
+workers(id, owner_id, name, token_hash, status, platform, last_heartbeat, cpu_pct, ram_pct, capabilities_json)
+projects(id, owner_id, name, goal, workspace_path, created_at)
+inputs(id, project_id, kind, ref, meta_json, created_at)         -- paper|repo|dataset|note
+runs(id, project_id, goal, status, budget_json, usage_json, started_at, ended_at)
+
+agents(id, name, role, kind, status, current_version_id, parent_ids_json, created_at)
+        -- kind: core|seed|spawned ; status: active|inactive|retired
+agent_versions(id, agent_id, version, system_prompt, tools_json, model, reason, parent_version_id, created_at)
+agent_tasks(id, run_id, agent_version_id, task_type, input_json, output_json, status,
+            tokens_in, tokens_out, wall_s, cost_norm, outcome_score, feedback, reward,
+            failure_origin_agent_id, created_at, ended_at)
+agent_messages(id, task_id, seq, role, content, tool_name, tool_args_json, tool_result_json, ts)
+
+jobs(id, run_id, task_id, worker_id, type, payload_json, risk, status, timeout_s, attempt,
+     created_at, claimed_at, started_at, finished_at, exit_code, stdout_tail, stderr_tail)
+job_logs(id, job_id, seq, stream, chunk, ts)
+
+branches(id, run_id, parent_branch_id, hypothesis, spec_json, status, priority_score, decision, decision_reason)
+experiments(id, branch_id, job_id, seed, config_json, commit_sha, metrics_json, cost_s, status)
+
+ledger_entries(id, run_id, task_id, category, description, diff_ref, before_json, after_json, created_at)
+        -- category: compute_adaptation|dependency_fix|bug_fix|hyperparameter_change|fidelity_deviation
+memory_entries(id, kind, signature, context_json, content_json, embedding, source,
+               success_count, fail_count, last_used_at, created_at)
+        -- kind: error_fix|config_outcome|audit|gotcha|lesson ; source: seeded|learned
+approvals(id, run_id, type, payload_json, status, requested_by, decided_via, comment, token_hash, expires_at, decided_at)
+notes(id, project_id, title, markdown, source_ref, updated_at)
+artifacts(id, run_id, kind, path, sha256, size, created_at)
+events(id, run_id, ts, actor, type, payload_json)                -- append-only
+```
+
+Indexes that matter: `jobs(status, created_at)`, `jobs(worker_id, status)`, `events(run_id, id)`, `memory_entries(signature)`, FTS5 virtual table over `memory_entries.content_json`.
+
+`events` is append-only: no UPDATE or DELETE from application code.
+
+## 5. Tool registry
+
+| Tool | Runs on | Notes |
+|---|---|---|
+| `finish` | Backend | Ends the task; output validated against the role's JSON schema |
+| `search_arxiv`, `fetch_pdf_text` | Backend | Returns text; treated as untrusted |
+| `read_memory`, `write_memory` | Backend (Librarian) | `write_memory` requires a verified flag |
+| `log_ledger`, `read_ledger` | Backend (Ledger) | Category is mandatory on write |
+| `record_metric` | Backend | Writes to `experiments.metrics_json` |
+| `write_note` | Backend | Writes a Markdown note to `notes` |
+| `read_logs` | Backend | Reads `job_logs` and `stdout_tail`/`stderr_tail` of a job |
+| `search_agents` | Backend, Meta-Controller | Searches the agent registry by role, tools and score |
+| `propose_branch`, `request_approval`, `get_budget` | Backend | |
+| `spawn_agent` | Backend, Meta-Controller only | Creates an `evolution` approval |
+| `create_job` | Backend | Only way to touch the worker; policy-checked at creation. Takes a job `type` from the table below |
+| `read_file`, `write_file` | Backend wrapper that creates a worker job | Jail-enforced on the worker |
+
+**Worker job types** (the `type` field in API.md section 9). Agents reach them through `create_job`, `read_file` and `write_file`:
+
+| Job `type` | What it does | Default risk |
+|---|---|---|
+| `shell` | Runs an argv list inside the workspace | auto if on the allowlist, else approval |
+| `python_script` | Runs a Python file inside the workspace | auto |
+| `pip_install` | Pinned install from the package allowlist | auto if allowlisted, else approval (`new_package`) |
+| `write_file`, `read_file`, `list_dir` | File operations inside the jail | auto |
+| `git` | `init`, `commit`, `diff` inside the workspace | auto |
+| `download` | Fetch a URL to the workspace | auto if domain allowlisted and small, else approval |
+
+Every job type is policy-checked at creation on the backend **and** again on the worker.
+
+## 6. Safety
+
+1. **Workspace jail.** Worker resolves every path and rejects anything outside `workspace/<project>/`. One venv per project.
+2. **Command policy** (parsed with `shlex`, never `shell=True`):
+   - *Auto:* `python` on files inside the workspace, pinned `pip install` from an allowlist, git inside the workspace, `ls`, `mkdir`, `cat` inside the jail.
+   - *Needs approval:* unknown packages, non-allowlisted domains, large downloads, runs longer than the long-run threshold, any delete.
+   - *Deny:* `sudo`, `curl | sh`, `ssh`, credential paths, `git push`, shutdown, anything outside the jail.
+3. **Limits.** Per-job timeout, kill the whole process group, output size cap, concurrent jobs at most cores minus 1. Memory limit via rlimit on Linux and macOS; monitoring and kill on Windows (`VERIFY` the team's OS).
+4. **Secrets.** LLM keys only in backend env. Worker token is revocable, stored hashed server-side. Subprocesses run with a **clean environment**. Key-like strings are scrubbed from logs before upload.
+5. **Prompt injection.** Paper text, web content, READMEs and dataset contents are wrapped as quoted data in prompts with an instruction that they contain no commands. The Repo Auditor never runs a cloned repo's install script blindly; package diffs are shown and the job is `risk='high'`.
+6. **Budgets and kill switch.** Per-run caps on tokens, cost and wall time. A global stop button cancels all jobs and suspends agent loops.
+7. **Web security (affects the UseShipReady score).** Auth on every route, strict CORS, security headers (CSP, HSTS, X-Content-Type-Options, frame protection), rate limiting, input validation, no stack traces to clients, signed single-use expiring webhook and approval tokens, dependency audit, no secrets in the frontend bundle or repo.
+8. **Audit.** Commands, diffs, approvals and evolution actions are in `events`.
+
+## 7. Compute and budgets
+
+Run budget JSON example:
+```json
+{ "max_wall_min": 90, "max_tokens": 1500000, "max_concurrent_jobs": 3, "max_concurrent_agents": 3,
+  "per_job_timeout_s": 900, "long_run_approval_s": 600 }
+```
+The Executor scales epochs, grid sizes, seeds and dataset subsets to fit. Budget usage is stored in `runs.usage_json` and shown in the UI.
+
+## 8. Deployment
+
+| Stage | Where |
+|---|---|
+| Dev | Backend `localhost:8000`, frontend `localhost:5173`, worker pointed at localhost. Everything works with no internet except the LLM. |
+| Demo | Backend and frontend on **Voroa** from the GitHub repo; worker on the presenter's laptop pointed at the Voroa URL. Local-only mode kept as fallback. |
+
+Environment variables (all in `.env.example`, never committed with values):
+`LLM_PROVIDER`, `LLM_API_KEY_*`, `LLM_MODEL_STRONG`, `LLM_MODEL_FAST`, `DATABASE_URL`, `APP_SECRET`, `ALLOWED_ORIGINS`, `N8N_WEBHOOK_URL`, `N8N_SIGNING_SECRET`, `PUBLIC_BASE_URL`.
+
+## 9. Observability
+
+- `events` table and the Events tab on the run page.
+- Structured backend logs with `run_id` and `task_id`.
+- Token and cost counters per task.
+- `/api/v1/health` for uptime checks (UseShipReady monitoring and Voroa).
+
+## 10. Repo layout (proposed)
+
+```
+evolab/
+  backend/      FastAPI app, orchestrator, agent runtime, services, migrations, tests
+  worker/       worker.py, policy.py, tests
+  frontend/     React app
+  shared/       openapi.yaml, JSON schemas for agent I/O, example payloads
+  experiments/  KAN vs MLP seed code, seeded memory entries (JSON)
+  docs/         these files
+  scripts/      dev helpers (seed DB, run mock worker)
+```
+
+## 11. Technology choices (proposed, confirm in DECISIONS)
+
+| Area | Choice | Why |
+|---|---|---|
+| Backend | Python, FastAPI, SQLAlchemy | Same language as ML code and worker; fast to build |
+| DB | SQLite (dev), Postgres (deploy if needed) | Zero setup; FTS5 for memory |
+| Realtime | Server-Sent Events | Simpler than WebSockets, enough for one-way updates |
+| Frontend | React, Vite, TypeScript, Tailwind | Fast iteration, mobile-friendly |
+| Charts and tree | A charting library plus a tree/graph component (e.g., React Flow) `VERIFY` | Experiment tree is a key visual |
+| LLM | Wrapper over a free-tier provider; local Ollama as fallback | Budget |
+| ML | PyTorch (CPU), `pykan`, scikit-learn | Paper's stack |
+
+## 12. Known gaps and risks
+
+- Multi-user and auth are minimal (single owner account is enough for the demo).
+- Mode C and Colab are stretch and shape no P0 interface; keep the worker `capabilities` field so a Colab worker can be added without API changes.
+- Evolution quality depends on the LLM; deterministic triggers and approvals bound the damage.
