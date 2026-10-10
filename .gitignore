@@ -11,3 +11,7 @@ worker/.worker_token
 
 # Cached baseline results must be committed — do not ignore.
 !experiments/results/baseline/
+
+# Backend runtime files (reports, uploads, caches)
+backend/artifacts/
+artifacts/

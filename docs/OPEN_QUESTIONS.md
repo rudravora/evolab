@@ -20,7 +20,6 @@ Unresolved items. Each has an owner (role A, B or C, see COORDINATION.md) and a 
 | Q-15 | Repo name, license, and public vs private | Voroa deploys from GitHub | A | Kickoff | |
 | Q-16 | Final product name (EvoLab is a placeholder) | Branding in UI and deck | Team | Before M5 | |
 | Q-17 | Who presents the demo, and who rehearses fallback replays? | Demo reliability | C | M4 | |
-| Q-18 | With no upload size cap (D-034), where do large browser uploads live? Voroa disk may be ephemeral and the free tier includes 5 GB bandwidth | Uploads could fail or exhaust bandwidth | A | M2 | Suggest: large files by URL or worker path; browser uploads relayed to the worker, then deleted from the backend |
 | Q-19 | Which small tabular dataset for the combined demo (licence, size, a known KAN or MLP baseline)? Plus a second one for the memory-reuse run | Demo content | B | M2 | Must be CPU-friendly and public |
 | Q-20 | Ship the 22 domain template stubs in v1 (about an hour), or leave the template library empty? | Ladder step 3 visibility vs scope | Team | M4 | Empty library keeps the tabular gap a genuine fresh spawn |
 | Q-21 | Scope checkpoint: if the paper path is not end to end by M2, which later path is reduced first? | Four full-depth paths on a 3-person team | Team | M2 | Default order of reduction: question, then dataset (D-037) |
@@ -28,6 +27,9 @@ Unresolved items. Each has an owner (role A, B or C, see COORDINATION.md) and a 
 | Q-24 | Supermemory: SDK version to pin, plan limits, and whether paper text and transcripts may be sent there | Librarian implementation and data policy | A | M0 | SDK docs show two API shapes (`container_tags`/`search.documents` vs `container_tag`/`search.memories`); `VERIFY` against the pinned version |
 | Q-25 | LangSmith: plan, retention, and what is scrubbed from traces | Untrusted inputs and secrets leave the backend | A | M0 | `VERIFY` env var names (`LANGSMITH_TRACING` vs older `LANGCHAIN_TRACING_V2`) for the pinned SDK |
 | Q-26 | Council cost: 3 extra LLM calls per agent task. Score every task, or sample when rate-limited? | Rate limits may bind before M3 | A | M2 | Default: every task, async, `FEATURE_COUNCIL` to turn off |
+| Q-27 | B's harness writes `results/<random run_id>.json`; the Executor needs the result at a known path. Add `--out-file <path>` to `experiments/harness/run.py`? | Without it, experiment metrics come back empty and every run goes to the Debugger | B | M2 | Executor passes `{results_path}`; the Implementer's template can use `--out-file {results_path}` once it exists |
+| Q-28 | B's `worker/runner.py` is POSIX-only (`resource`, `os.killpg`, `start_new_session`) and crashes on Windows. Which OS runs the demo worker? | The demo laptop may be Windows | B | M1 | See Q-09 |
+| Q-29 | Voroa: one instance only? The orchestrator and sweeper run inside the web process | Task claims are atomic, but two instances would double LLM concurrency and split the in-memory rate limits | A | M5 | Pin to one instance, or move the scheduler to a separate worker process later |
 
 ## Resolved
 
@@ -44,3 +46,4 @@ Unresolved items. Each has an owner (role A, B or C, see COORDINATION.md) and a 
 | Q-R9 | Embeddings for memory? (was Q-10) | Retrieval moves to Supermemory (D-038); no local embeddings | 2026-10-10 |
 | Q-R10 | Which LLM models? (was part of Q-02) | GPT-5.6 Luna, DeepSeek V4 Pro, GPT-5 Mini in three tiers (D-041); IDs and limits continue as Q-23 | 2026-10-10 |
 | Q-R11 | Capability tag vocabulary? (was Q-22) | Frozen in `backend/agents/tags.json` (D-043) | 2026-10-10 |
+| Q-R12 | Where do large browser uploads live? (was Q-18) | Relayed to the worker by a signed download, then deleted from the backend (D-050) | 2026-10-10 |

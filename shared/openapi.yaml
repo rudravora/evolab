@@ -486,6 +486,201 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/brief:
+    get:
+      tags:
+      - projects
+      summary: Get Brief
+      operationId: get_brief_api_v1_runs__run_id__brief_get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get Brief Api V1 Runs  Run Id  Brief Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/plan:
+    get:
+      tags:
+      - projects
+      summary: Get Plan
+      operationId: get_plan_api_v1_runs__run_id__plan_get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get Plan Api V1 Runs  Run Id  Plan Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/plan/revisions:
+    get:
+      tags:
+      - projects
+      summary: Plan Revisions
+      operationId: plan_revisions_api_v1_runs__run_id__plan_revisions_get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response Plan Revisions Api V1 Runs  Run Id  Plan Revisions
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/chat:
+    post:
+      tags:
+      - projects
+      summary: Post Chat
+      operationId: post_chat_api_v1_runs__run_id__chat_post
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatIn'
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Post Chat Api V1 Runs  Run Id  Chat Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - projects
+      summary: Get Chat
+      operationId: get_chat_api_v1_runs__run_id__chat_get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 100
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response Get Chat Api V1 Runs  Run Id  Chat Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/projects/{project_id}/inputs:
+    post:
+      tags:
+      - projects
+      summary: Add Input
+      description: 'Add an input mid-run (a re-planning trigger). Files: multipart
+        `file`; otherwise `ref` + `source`.'
+      operationId: add_input_api_v1_projects__project_id__inputs_post
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Project Id
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_add_input_api_v1_projects__project_id__inputs_post'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Add Input Api V1 Projects  Project Id  Inputs Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/runs/{run_id}/events:
     get:
       tags:
@@ -655,7 +850,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DecideIn'
+              $ref: '#/components/schemas/app__routes__approvals__DecideIn'
       responses:
         '200':
           description: Successful Response
@@ -885,6 +1080,724 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/worker/artifacts:
+    post:
+      tags:
+      - worker
+      summary: Upload Artifact
+      description: Result files referenced by a job (size-capped, type-allowlisted).
+      operationId: upload_artifact_api_v1_worker_artifacts_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_upload_artifact_api_v1_worker_artifacts_post'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Upload Artifact Api V1 Worker Artifacts Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/tasks:
+    get:
+      tags:
+      - tasks
+      summary: List Tasks
+      operationId: list_tasks_api_v1_runs__run_id__tasks_get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      - name: agent_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Id
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response List Tasks Api V1 Runs  Run Id  Tasks Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tasks/{task_id}:
+    get:
+      tags:
+      - tasks
+      summary: Get Task
+      operationId: get_task_api_v1_tasks__task_id__get
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Task Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get Task Api V1 Tasks  Task Id  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tasks/{task_id}/messages:
+    get:
+      tags:
+      - tasks
+      summary: Task Messages
+      operationId: task_messages_api_v1_tasks__task_id__messages_get
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Task Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response Task Messages Api V1 Tasks  Task Id  Messages Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tasks/{task_id}/feedback:
+    post:
+      tags:
+      - tasks
+      summary: Feedback
+      operationId: feedback_api_v1_tasks__task_id__feedback_post
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Task Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedbackIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Feedback Api V1 Tasks  Task Id  Feedback Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tasks/{task_id}/council:
+    get:
+      tags:
+      - tasks
+      summary: Task Council
+      operationId: task_council_api_v1_tasks__task_id__council_get
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Task Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Task Council Api V1 Tasks  Task Id  Council Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/agent-graph:
+    get:
+      tags:
+      - tasks
+      summary: Agent Graph
+      operationId: agent_graph_api_v1_runs__run_id__agent_graph_get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Agent Graph Api V1 Runs  Run Id  Agent Graph Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/tree:
+    get:
+      tags:
+      - experiments
+      summary: Tree
+      operationId: tree_api_v1_runs__run_id__tree_get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Tree Api V1 Runs  Run Id  Tree Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/branches/{branch_id}:
+    get:
+      tags:
+      - experiments
+      summary: Get Branch
+      operationId: get_branch_api_v1_branches__branch_id__get
+      parameters:
+      - name: branch_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Branch Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get Branch Api V1 Branches  Branch Id  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/branches/{branch_id}/pause:
+    post:
+      tags:
+      - experiments
+      summary: Pause Branch
+      description: Running experiments finish; pending ones are held until the branch
+        is expanded again.
+      operationId: pause_branch_api_v1_branches__branch_id__pause_post
+      parameters:
+      - name: branch_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Branch Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Pause Branch Api V1 Branches  Branch Id  Pause Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/branches/{branch_id}/kill:
+    post:
+      tags:
+      - experiments
+      summary: Kill Branch
+      operationId: kill_branch_api_v1_branches__branch_id__kill_post
+      parameters:
+      - name: branch_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Branch Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Kill Branch Api V1 Branches  Branch Id  Kill Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/branches/{branch_id}/expand:
+    post:
+      tags:
+      - experiments
+      summary: Expand Branch
+      description: 'Researcher override: resume a paused branch, or run a proposed/pruned
+        one if branches still run in this plan.'
+      operationId: expand_branch_api_v1_branches__branch_id__expand_post
+      parameters:
+      - name: branch_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Branch Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpandIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Expand Branch Api V1 Branches  Branch Id  Expand Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/ledger:
+    get:
+      tags:
+      - experiments
+      summary: Ledger
+      operationId: ledger_api_v1_runs__run_id__ledger_get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response Ledger Api V1 Runs  Run Id  Ledger Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/report:
+    get:
+      tags:
+      - experiments
+      summary: Report
+      operationId: report_api_v1_runs__run_id__report_get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Report Api V1 Runs  Run Id  Report Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runs/{run_id}/artifacts:
+    get:
+      tags:
+      - experiments
+      summary: Artifacts
+      operationId: artifacts_api_v1_runs__run_id__artifacts_get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response Artifacts Api V1 Runs  Run Id  Artifacts Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/artifacts/{artifact_id}/download:
+    get:
+      tags:
+      - experiments
+      summary: Download
+      operationId: download_api_v1_artifacts__artifact_id__download_get
+      parameters:
+      - name: artifact_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Artifact Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/memory:
+    get:
+      tags:
+      - memory
+      summary: List Memory
+      operationId: list_memory_api_v1_memory_get
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Q
+      - name: kind
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kind
+      - name: source
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response List Memory Api V1 Memory Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/memory/{entry_id}:
+    get:
+      tags:
+      - memory
+      summary: Get Memory
+      operationId: get_memory_api_v1_memory__entry_id__get
+      parameters:
+      - name: entry_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Entry Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get Memory Api V1 Memory  Entry Id  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/projects/{project_id}/notes:
+    get:
+      tags:
+      - memory
+      summary: List Notes
+      operationId: list_notes_api_v1_projects__project_id__notes_get
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Project Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response List Notes Api V1 Projects  Project Id  Notes Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - memory
+      summary: Create Note
+      operationId: create_note_api_v1_projects__project_id__notes_post
+      parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Project Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteIn'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Create Note Api V1 Projects  Project Id  Notes Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/notes/{note_id}:
+    put:
+      tags:
+      - memory
+      summary: Update Note
+      operationId: update_note_api_v1_notes__note_id__put
+      parameters:
+      - name: note_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Note Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Update Note Api V1 Notes  Note Id  Put
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/hooks/n8n/decide:
+    post:
+      tags:
+      - hooks
+      summary: N8N Decide
+      operationId: n8n_decide_api_v1_hooks_n8n_decide_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/app__routes__hooks__DecideIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response N8N Decide Api V1 Hooks N8N Decide Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/uploads/{input_id}:
+    get:
+      tags:
+      - hooks
+      summary: Relay Download
+      operationId: relay_download_api_v1_uploads__input_id__get
+      parameters:
+      - name: input_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Input Id
+      - name: exp
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: Exp
+      - name: sig
+        in: query
+        required: true
+        schema:
+          type: string
+          maxLength: 128
+          title: Sig
+      responses:
+        '200':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AgentOut:
@@ -1013,6 +1926,53 @@ components:
       required:
       - attempt
       title: AttemptIn
+    Body_add_input_api_v1_projects__project_id__inputs_post:
+      properties:
+        kind:
+          type: string
+          title: Kind
+        file:
+          anyOf:
+          - type: string
+            contentMediaType: application/octet-stream
+          - type: 'null'
+          title: File
+        ref:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Ref
+        source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source
+      type: object
+      required:
+      - kind
+      title: Body_add_input_api_v1_projects__project_id__inputs_post
+    Body_upload_artifact_api_v1_worker_artifacts_post:
+      properties:
+        job_id:
+          type: string
+          title: Job Id
+        attempt:
+          type: integer
+          title: Attempt
+        path:
+          type: string
+          title: Path
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - job_id
+      - attempt
+      - path
+      - file
+      title: Body_upload_artifact_api_v1_worker_artifacts_post
     Budget:
       properties:
         max_wall_min:
@@ -1052,6 +2012,22 @@ components:
           title: Python
       type: object
       title: Capabilities
+    ChatIn:
+      properties:
+        message:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Message
+        target_agent_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Agent Id
+      type: object
+      required:
+      - message
+      title: ChatIn
     ClaimOut:
       properties:
         job_id:
@@ -1090,31 +2066,6 @@ components:
       - timeout_s
       - max_output_bytes
       title: ClaimOut
-    DecideIn:
-      properties:
-        decision:
-          type: string
-          enum:
-          - approve
-          - reject
-          - edit
-          title: Decision
-        comment:
-          anyOf:
-          - type: string
-            maxLength: 2000
-          - type: 'null'
-          title: Comment
-        edited_payload:
-          anyOf:
-          - additionalProperties: true
-            type: object
-          - type: 'null'
-          title: Edited Payload
-      type: object
-      required:
-      - decision
-      title: DecideIn
     EventOut:
       properties:
         id:
@@ -1151,6 +2102,29 @@ components:
       - type
       - payload
       title: EventOut
+    ExpandIn:
+      properties:
+        reason:
+          type: string
+          maxLength: 1000
+          minLength: 1
+          title: Reason
+      type: object
+      required:
+      - reason
+      title: ExpandIn
+    FeedbackIn:
+      properties:
+        value:
+          type: string
+          enum:
+          - up
+          - down
+          title: Value
+      type: object
+      required:
+      - value
+      title: FeedbackIn
     FileRef:
       properties:
         path:
@@ -1490,6 +2464,28 @@ components:
             max_tokens: 1500000
       type: object
       title: NewRunIn
+    NoteIn:
+      properties:
+        title:
+          type: string
+          maxLength: 300
+          minLength: 1
+          title: Title
+        markdown:
+          type: string
+          maxLength: 50000
+          title: Markdown
+        source_ref:
+          anyOf:
+          - type: string
+            maxLength: 300
+          - type: 'null'
+          title: Source Ref
+      type: object
+      required:
+      - title
+      - markdown
+      title: NoteIn
     Ok:
       properties:
         ok:
@@ -1940,3 +2936,52 @@ components:
       - capabilities
       - revoked
       title: WorkerOut
+    app__routes__approvals__DecideIn:
+      properties:
+        decision:
+          type: string
+          enum:
+          - approve
+          - reject
+          - edit
+          title: Decision
+        comment:
+          anyOf:
+          - type: string
+            maxLength: 2000
+          - type: 'null'
+          title: Comment
+        edited_payload:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Edited Payload
+      type: object
+      required:
+      - decision
+      title: DecideIn
+    app__routes__hooks__DecideIn:
+      properties:
+        approval_id:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Approval Id
+        decision:
+          type: string
+          enum:
+          - approve
+          - reject
+          title: Decision
+        token:
+          type: string
+          maxLength: 2000
+          minLength: 10
+          title: Token
+      type: object
+      required:
+      - approval_id
+      - decision
+      - token
+      title: DecideIn

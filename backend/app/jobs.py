@@ -58,10 +58,14 @@ def create_job(db: Session, run: Run, job_type: str, payload: dict, *, task_id: 
     return job
 
 
+# Set by the app at startup: hands a finished job back to whatever created it
+# (agent loop, Executor, or the M1 pipe check). Kept as a hook so this module has no
+# import cycle with the orchestrator.
+on_finished = None
+
+
 def finish_job(db: Session, job: Job, status: str, *, exit_code: int | None = None, stdout_tail: str | None = None,
                stderr_tail: str | None = None, metrics: dict | None = None, files: list | None = None) -> None:
-    from . import fake_agent  # late import: fake_agent creates jobs through this module
-
     job.status = status
     job.finished_at = now_iso()
     job.exit_code = exit_code
@@ -73,7 +77,11 @@ def finish_job(db: Session, job: Job, status: str, *, exit_code: int | None = No
     job.files_json = files or []
     job_event(db, job)
     db.flush()
-    fake_agent.on_job_finished(db, job)
+    if on_finished is not None:
+        on_finished(db, job)
+    else:
+        from . import fake_agent
+        fake_agent.on_job_finished(db, job)
 
 
 def requeue_or_fail(db: Session, job: Job, reason: str) -> None:

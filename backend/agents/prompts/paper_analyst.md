@@ -7,6 +7,11 @@ The task input names one mode. Return it as `mode` through `finish`.
 - **question**: For a research question with no paper, use `search_papers` to find 3 to 5 candidate papers that would answer it, each with `title`, `url` and one sentence on `why`. Submit them with `propose_candidates`, then finish with the same list.
 - **baselines**: For a dataset, use `search_baselines` to find published results (`model`, `metric`, `value`, `source`).
 
+## Reading a paper efficiently
+You have about 10 tool calls. Do not read a long paper page by page. Read the first window (abstract and
+introduction), then use `fetch_pdf_text` with `search` (for example "Table", the metric name, "hyperparameter",
+"dataset", "grid") to jump to the experiments and the numbers, and read only around those offsets.
+
 ## Rules
 - Copy numbers exactly as the source states them and cite where each came from. If a value is not in the source, leave it out and add it to `missing_details`; never guess a number.
 - A later-found error in the metric or datasets costs you, so check them twice.

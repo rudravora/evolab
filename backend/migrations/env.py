@@ -3,10 +3,9 @@
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import create_engine
 
 from app import models  # noqa: F401  (registers tables on Base.metadata)
-from app.db import Base
+from app.db import Base, make_engine
 
 config = context.config
 if config.config_file_name is not None and config.attributes.get("configure_logger", True):
@@ -31,7 +30,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    engine = create_engine(_url())
+    engine = make_engine(_url())
     with engine.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata, render_as_batch=True)
         with context.begin_transaction():

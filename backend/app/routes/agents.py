@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..deps import get_db
 from ..errors import ApiError
 from ..models import Agent, AgentVersion
+from ..rewards import rolling_reward
 from ..security import current_user
 
 router = APIRouter(prefix="/agents", tags=["agents"], dependencies=[Depends(current_user)])
@@ -55,7 +56,7 @@ def _agent_out(a: Agent, db: Session) -> AgentOut:
     return AgentOut(id=a.id, name=a.name, role=a.role, kind=a.kind, status=a.status, origin=a.origin,
                     evolvable=a.evolvable, council_evaluated=a.council_evaluated,
                     parent_ids=a.parent_ids_json or [], current_version=_summary(v) if v else None,
-                    rolling_reward=None)
+                    rolling_reward=rolling_reward(db, a.id))
 
 
 def _get_agent(agent_id: str, db: Session) -> Agent:
