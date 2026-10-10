@@ -1,0 +1,23 @@
+{
+  "job": {
+    "job_id": "job_example_shell_01",
+    "attempt": 1,
+    "type": "shell",
+    "payload": {
+      "argv": ["ls", "-la", "."],
+      "cwd": "runs/example_project/code",
+      "env": { "OMP_NUM_THREADS": "4" }
+    },
+    "timeout_s": 900,
+    "max_output_bytes": 5000000
+  },
+  "result": {
+    "attempt": 1,
+    "status": "done",
+    "exit_code": 0,
+    "stdout_tail": "total 8\ndrwxr-xr-x 3 worker worker 96 Jan 1 00:00 .\n-rw-r--r-- 1 worker worker 0 Jan 1 00:00 placeholder.txt\n",
+    "stderr_tail": "",
+    "metrics": {},
+    "files": []
+  }
+}

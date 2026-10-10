@@ -1,0 +1,21 @@
+{
+  "job": {
+    "job_id": "job_example_pip_install_01",
+    "attempt": 1,
+    "type": "pip_install",
+    "payload": {
+      "packages": ["example-lib==1.2.3"]
+    },
+    "timeout_s": 300,
+    "max_output_bytes": 2000000
+  },
+  "result": {
+    "attempt": 1,
+    "status": "done",
+    "exit_code": 0,
+    "stdout_tail": "Successfully installed example-lib-1.2.3\n",
+    "stderr_tail": "",
+    "metrics": {},
+    "files": []
+  }
+}

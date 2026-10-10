@@ -1,0 +1,23 @@
+{
+  "job": {
+    "job_id": "job_example_download_01",
+    "attempt": 1,
+    "type": "download",
+    "payload": {
+      "url": "https://example.invalid/datasets/example-dataset.csv",
+      "dest": "runs/example_project/data/example-dataset.csv",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "timeout_s": 300,
+    "max_output_bytes": 100000
+  },
+  "result": {
+    "attempt": 1,
+    "status": "done",
+    "exit_code": 0,
+    "stdout_tail": "downloaded 1048576 bytes\n",
+    "stderr_tail": "",
+    "metrics": {},
+    "files": [ { "path": "runs/example_project/data/example-dataset.csv", "sha256": "2222222222222222222222222222222222222222222222222222222222222222" } ]
+  }
+}
