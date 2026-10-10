@@ -184,7 +184,8 @@ The returned diff is classified: **minor** (add a debug or data-fix task, reorde
 SQLite for development; Voroa managed Postgres for deployment. Memory search goes through Supermemory behind the Librarian interface; the database keeps the audit record only (D-038). IDs are text (UUID or ULID). Timestamps are UTC ISO strings. JSON columns are validated at the API layer.
 
 ```sql
-workers(id, owner_id, name, token_hash, status, platform, last_heartbeat, cpu_pct, ram_pct, capabilities_json)
+workers(id, owner_id, name, token_hash, status, platform, last_heartbeat, cpu_pct, ram_pct, capabilities_json, created_at)
+worker_pairings(id, owner_id, code_hash, expires_at, used_at, worker_id, created_at)   -- one-time pairing codes, hashed
 projects(id, owner_id, name, goal, workspace_path, created_at)
 inputs(id, project_id, kind, ref, source, meta_json, created_at)
         -- kind: paper|question|repo|dataset|note ; source: url|upload|worker_path|text
@@ -193,11 +194,12 @@ runs(id, project_id, goal, status, entry_types_json, brief_json, activation_json
 plan_revisions(id, run_id, version, trigger, kind, diff_json, reason, approval_id, created_at)
         -- kind: initial|minor|major
 
-agents(id, name, role, kind, status, origin, current_version_id, parent_ids_json, created_at)
+agents(id, name, role, kind, status, origin, current_version_id, parent_ids_json,
+       evolvable, council_evaluated, counts_toward_active_cap, created_at)
         -- kind: core|seed|spawned|template ; status: active|inactive|retired|dormant
         -- origin: seed|template:<name>|specialised:<agent_id>|fresh|restored
-agent_versions(id, agent_id, version, system_prompt, tools_json, capability_tags_json, model, reason,
-               parent_version_id, probation_json, created_at)
+agent_versions(id, agent_id, version, system_prompt, tools_json, capability_tags_json, model, output_schema,
+               max_steps, reason, parent_version_id, probation_json, created_at)
 agent_tasks(id, run_id, agent_version_id, task_type, required_tags_json, input_json, output_json, signals_json, status,
             tokens_in, tokens_out, wall_s, cost_norm, outcome_det, council_q, council_judges,
             council_disagreement, council_split, outcome_score, feedback, reward,
@@ -207,19 +209,24 @@ council_scores(id, task_id, judge_agent_id, tier, scores_json, overall, rational
                confidence, tokens_in, tokens_out, created_at)
 agent_messages(id, task_id, seq, role, content, tool_name, tool_args_json, tool_result_json, ts)
 
-jobs(id, run_id, task_id, worker_id, type, payload_json, risk, status, timeout_s, attempt,
-     created_at, claimed_at, started_at, finished_at, exit_code, stdout_tail, stderr_tail)
-job_logs(id, job_id, seq, stream, chunk, ts)
+jobs(id, run_id, project_id, task_id, worker_id, type, payload_json, risk, approved, cancel_requested,
+     policy_reason, status, timeout_s, max_output_bytes,
+     attempt, created_at, claimed_at, started_at, finished_at, exit_code, stdout_tail, stderr_tail,
+     metrics_json, files_json)
+        -- project_id selects the worker jail (D-042)
+job_logs(id, job_id, attempt, seq, stream, chunk, ts)
 
-branches(id, run_id, parent_branch_id, hypothesis, spec_json, status, priority_score, decision, decision_reason)
-experiments(id, branch_id, job_id, seed, config_json, commit_sha, metrics_json, cost_s, status)
+branches(id, run_id, parent_branch_id, hypothesis, kind, spec_json, status, priority_score, decision,
+         decision_reason, created_at)
+experiments(id, branch_id, job_id, seed, config_json, commit_sha, metrics_json, cost_s, status, created_at)
 
 ledger_entries(id, run_id, task_id, category, description, diff_ref, before_json, after_json, created_at)
         -- category: compute_adaptation|dependency_fix|bug_fix|hyperparameter_change|fidelity_deviation
 memory_entries(id, kind, signature, context_json, content_json, supermemory_id, source,
                success_count, fail_count, last_used_at, created_at)
         -- kind: error_fix|config_outcome|audit|gotcha|lesson|dataset_profile ; source: seeded|learned
-approvals(id, run_id, type, payload_json, status, requested_by, decided_via, comment, token_hash, expires_at, decided_at)
+approvals(id, run_id, type, payload_json, status, requested_by, decided_via, comment, token_hash, expires_at,
+          decided_at, created_at)
 notes(id, project_id, title, markdown, source_ref, updated_at)
 artifacts(id, run_id, kind, path, sha256, size, created_at)
 events(id, run_id, ts, actor, type, payload_json)                -- append-only
@@ -227,7 +234,9 @@ events(id, run_id, ts, actor, type, payload_json)                -- append-only
 
 Indexes that matter: `jobs(status, created_at)`, `jobs(worker_id, status)`, `events(run_id, id)`, `memory_entries(signature)`, `council_scores(task_id)`.
 
-`events` is append-only: no UPDATE or DELETE from application code.
+`events` is append-only: no UPDATE or DELETE from application code (enforced by an ORM hook in `backend/app/models.py`). `events.id` is an autoincrement integer so it can serve as the monotonic SSE event id.
+
+The schema lives in `backend/app/models.py`; migrations are Alembic (`backend/migrations/`). A test fails if the models drift from the migrations.
 
 ## 5. Tool registry
 

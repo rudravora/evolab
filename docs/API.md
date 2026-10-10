@@ -42,6 +42,18 @@ Version 0.5. Base path: `/api/v1`. JSON everywhere unless noted. This file is th
 |---|---|---|
 | GET | `/health` | No auth. `{ "status": "ok", "version": "...", "time": "..." }` |
 
+## 2a. Sign-in (dashboard, D-044)
+
+One owner account. The password hash lives in `OWNER_PASSWORD_HASH` (backend env only).
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/auth/login` | No auth. `{ "password": "..." }` → `{ "user": { "id": "usr_owner" }, "token": "...", "expires_at": <unix s> }`. Also sets the `evolab_session` cookie (HttpOnly, SameSite=Lax, Secure behind https). Use the token as `Authorization: Bearer <token>` when cookies are not available. Wrong password `401`; more than 5 attempts per minute per IP `429 rate_limited`; sign-in not configured `403` |
+| POST | `/auth/logout` | Clears the cookie. `204` |
+| GET | `/auth/me` | `{ "id": "usr_owner" }`; `401` without a valid session |
+
+Sessions last 12 hours. Interactive docs (`/docs`) and `/api/v1/openapi.json` are served only when `PUBLIC_BASE_URL` is not https (local dev); the committed `shared/openapi.yaml` is the reference.
+
 ## 3. Projects and runs (dashboard)
 
 ### POST `/projects`
@@ -131,7 +143,9 @@ Chat history.
 ## 5. Streaming (SSE)
 
 ### GET `/runs/{run_id}/stream`
-`Content-Type: text/event-stream`. Supports `Last-Event-ID` for resume. Each event: `id` (monotonic event id), `event` (type), `data` (JSON).
+`Content-Type: text/event-stream`. Supports `Last-Event-ID` (or `?after_id=`) for resume. Each event: `id` (monotonic event id), `event` (type), `data` (JSON). Global events with no run (`worker.status`) appear in every run's stream. A `: keepalive` comment is sent after 15 s of silence. The stream **closes** once the run is `done`, `failed` or `cancelled` and every event has been sent; reconnecting with the last id then returns nothing. Auth is the session cookie (EventSource cannot set headers).
+
+The same events are available as JSON from `GET /runs/{run_id}/events?after_id=&limit=` (limit 1–1000, default 200).
 
 | Event type | Data (abridged) |
 |---|---|
@@ -163,7 +177,7 @@ Chat history.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/agents` | All agents with current version, kind, status, origin, capability tags, rolling reward. `?kind=template` lists dormant templates |
+| GET | `/agents` | All agents with current version, kind, status, origin, capability tags, rolling reward. `?kind=template` lists dormant templates. Item shape: `{ "id", "name", "role", "kind", "status", "origin", "evolvable", "council_evaluated", "parent_ids", "current_version": { "id", "version", "model", "tools", "capability_tags", "reason", "parent_version_id", "created_at" }, "rolling_reward" }` |
 | GET | `/agents/{agent_id}` | Detail |
 | GET | `/agents/{agent_id}/versions` | Version timeline with `reason` and `parent_version_id` |
 | GET | `/agents/{agent_id}/versions/{version}` | Prompt and tools (diff against parent available via `?diff=1`) |
@@ -234,7 +248,7 @@ Payloads by type (examples):
 // type: risky_command
 { "command": "pip install pykan==0.2.8", "reason": "Required by official repo", "risk": "high" }
 ```
-Approvals created by the system expire (`expires_at`); expired means rejected.
+Approvals created by the system expire (`expires_at`, 30 minutes); expired means rejected. Job approvals (`risky_command`, `new_package`, `expensive_run`) carry `{ "summary", "job_id", "job_type", "payload", "reason", "risk" }`; approving makes the job claimable with `approved: true`, rejecting or expiring cancels it. `edit` is not yet supported for job approvals (`409 invalid_state`); approve or reject instead. Deciding an already-decided approval returns `409 invalid_state`.
 
 ## 9. Workers
 
@@ -263,9 +277,12 @@ Atomic claim. `204` if nothing; otherwise `200`:
   "job_id": "job_...", "project_id": "proj_...", "attempt": 1, "type": "shell",
   "payload": { "argv": ["python", "train_kan.py", "--seed", "0"], "cwd": "code",
                "env": { "OMP_NUM_THREADS": "4" } },
+  "approved": false,
   "timeout_s": 900, "max_output_bytes": 5000000
 }
 ```
+- **`approved`** (always present) is `true` when the researcher approved this job through a `risky_command`, `new_package` or `expensive_run` approval. The worker's own policy may run a `needs_approval` job only when `approved` is true; a `deny` verdict never runs.
+- Jobs of runs that are paused, cancelled or finished are not handed out.
 - **`project_id`** (always present) selects the jail: every job runs inside `WORKSPACE_ROOT/<project_id>/` on the worker.
 - **Paths:** `cwd` and every path in a payload (`path`, `dest`, `paths`) are relative to that jail. The worker rejects absolute paths and any `..` segment with `policy_denied`. The backend applies the same check when the job is created.
 - **Attempts and retries:** `attempt` starts at 1. A job lost to a worker that goes offline is requeued with `attempt + 1`, at most 2 times (max attempt 3); after that it is `failed`.

@@ -1,0 +1,60 @@
+{
+  "_comment": "Output of the deterministic activation rules (AGENTS.md section 4a) before the Meta-Controller adapts it. Shape of runs.activation_json and of `activation` in GET /runs/{id}/brief. Council judges are always on and not listed.",
+  "entry_types": [
+    "repo"
+  ],
+  "facts": [
+    {
+      "fact": "repo_present",
+      "evidence": "https://github.com/KindXiaoming/pykan"
+    }
+  ],
+  "activation": [
+    {
+      "agent_id": "agt_paper_analyst",
+      "active": false,
+      "reason": "not required yet: activated if the README links a paper"
+    },
+    {
+      "agent_id": "agt_repo_auditor",
+      "active": true,
+      "reason": "codebase supplied"
+    },
+    {
+      "agent_id": "agt_env_data_engineer",
+      "active": true,
+      "reason": "codebase fragment: environment"
+    },
+    {
+      "agent_id": "agt_implementer",
+      "active": true,
+      "reason": "codebase fragment: patch to run"
+    },
+    {
+      "agent_id": "agt_experiment_designer",
+      "active": true,
+      "reason": "codebase fragment: what-if branches"
+    },
+    {
+      "agent_id": "agt_meta_controller",
+      "active": true,
+      "reason": "every run"
+    },
+    {
+      "agent_id": "agt_evaluator",
+      "active": true,
+      "reason": "every run"
+    },
+    {
+      "agent_id": "agt_reporter",
+      "active": true,
+      "reason": "every run"
+    },
+    {
+      "agent_id": "agt_debugger",
+      "active": true,
+      "reason": "on demand: woken by failed jobs"
+    }
+  ],
+  "capability_gaps": []
+}

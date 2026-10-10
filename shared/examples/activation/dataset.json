@@ -1,0 +1,67 @@
+{
+  "_comment": "Output of the deterministic activation rules (AGENTS.md section 4a) before the Meta-Controller adapts it. Shape of runs.activation_json and of `activation` in GET /runs/{id}/brief. Council judges are always on and not listed.",
+  "entry_types": [
+    "dataset"
+  ],
+  "facts": [
+    {
+      "fact": "dataset_present",
+      "evidence": "tabular CSV by URL"
+    }
+  ],
+  "activation": [
+    {
+      "agent_id": "agt_paper_analyst",
+      "active": true,
+      "reason": "dataset path: search published baselines"
+    },
+    {
+      "agent_id": "agt_repo_auditor",
+      "active": false,
+      "reason": "not required: no codebase supplied"
+    },
+    {
+      "agent_id": "agt_env_data_engineer",
+      "active": true,
+      "reason": "dataset supplied: profile and leakage check"
+    },
+    {
+      "agent_id": "agt_implementer",
+      "active": false,
+      "reason": "not required: baseline scripts are run directly"
+    },
+    {
+      "agent_id": "agt_experiment_designer",
+      "active": true,
+      "reason": "dataset path: baseline suite"
+    },
+    {
+      "agent_id": "agt_meta_controller",
+      "active": true,
+      "reason": "every run"
+    },
+    {
+      "agent_id": "agt_evaluator",
+      "active": true,
+      "reason": "every run"
+    },
+    {
+      "agent_id": "agt_reporter",
+      "active": true,
+      "reason": "every run"
+    },
+    {
+      "agent_id": "agt_debugger",
+      "active": true,
+      "reason": "on demand: woken by failed jobs"
+    }
+  ],
+  "capability_gaps": [
+    {
+      "task_type": "baseline_suite",
+      "required_tags": [
+        "bench:tabular-protocol"
+      ]
+    }
+  ]
+}
