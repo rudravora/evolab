@@ -167,6 +167,9 @@ CLASSIFY_CASES = [
     # --- pip with extra index URL (needs approval even if package is allowlisted) ---
     ("pip extra-index-url needs approval", job("pip_install", {"packages": ["numpy==1.26.4"], "argv": ["pip", "install", "--extra-index-url", "http://evil.example.com", "numpy==1.26.4"]}), "needs_approval"),
     ("pip custom index-url needs approval", job("pip_install", {"packages": ["numpy==1.26.4"], "argv": ["pip", "install", "-i", "http://evil.example.com", "numpy==1.26.4"]}), "needs_approval"),
+    ("pip index_url field needs approval", job("pip_install", {"packages": ["numpy==1.26.4"], "index_url": "http://evil.example.com"}), "needs_approval"),
+    ("pip extra_index_url field needs approval", job("pip_install", {"packages": ["numpy==1.26.4"], "extra_index_url": "http://evil.example.com"}), "needs_approval"),
+    ("pip no index field, allowlisted, auto", job("pip_install", {"packages": ["numpy==1.26.4"]}), "auto"),
 
     # --- download: domain allowlist and size limit ---
     ("download pypi.org auto", job("download", {"url": "https://pypi.org/simple/numpy/", "dest": "proj1/code/x"}), "auto"),
@@ -205,11 +208,55 @@ def run_classify_tests() -> None:
         check(f"classify[{label}]", verdict == expected, f"expected={expected} got={verdict} reason={reason}")
 
 
+# ---------------------------------------------------------------------------
+# check_env tests
+# ---------------------------------------------------------------------------
+
+CHECK_ENV_CASES = [
+    ("benign key allowed", {"OMP_NUM_THREADS": "4"}, True),
+    ("GIT_SSH_COMMAND rejected", {"GIT_SSH_COMMAND": "ssh -o StrictHostKeyChecking=no"}, False),
+    ("GIT_CONFIG exact rejected", {"GIT_CONFIG": "/tmp/evil"}, False),
+    ("GIT_CONFIG_COUNT prefix rejected", {"GIT_CONFIG_COUNT": "1"}, False),
+    ("PYTHONPATH rejected", {"PYTHONPATH": "/tmp/evil"}, False),
+    ("PYTHONSTARTUP rejected", {"PYTHONSTARTUP": "/tmp/evil.py"}, False),
+    ("LD_PRELOAD rejected", {"LD_PRELOAD": "/tmp/evil.so"}, False),
+    ("LD_LIBRARY_PATH rejected", {"LD_LIBRARY_PATH": "/tmp/evil"}, False),
+    ("DYLD_INSERT_LIBRARIES rejected", {"DYLD_INSERT_LIBRARIES": "/tmp/evil.dylib"}, False),
+    ("DYLD_LIBRARY_PATH rejected", {"DYLD_LIBRARY_PATH": "/tmp/evil"}, False),
+    ("PIP_INDEX_URL rejected", {"PIP_INDEX_URL": "http://evil.example.com"}, False),
+    ("PIP_EXTRA_INDEX_URL rejected", {"PIP_EXTRA_INDEX_URL": "http://evil.example.com"}, False),
+    ("lowercase git_ssh_command still rejected (case-insensitive)", {"git_ssh_command": "x"}, False),
+    ("_KEY suffix rejected", {"OPENAI_API_KEY": "sk-123"}, False),
+    ("_TOKEN suffix rejected", {"GITHUB_TOKEN": "ghp_123"}, False),
+    ("_SECRET suffix rejected", {"APP_SECRET": "x"}, False),
+    ("key-like but not suffixed, allowed", {"KEYBOARD_LAYOUT": "us"}, True),
+    ("mixed benign+dangerous: only dangerous rejected", {"OMP_NUM_THREADS": "4", "GIT_SSH_COMMAND": "x"}, "mixed"),
+]
+
+
+def run_check_env_tests() -> None:
+    for label, env, expectation in CHECK_ENV_CASES:
+        allowed, rejected = policy.check_env(env)
+        if expectation == "mixed":
+            check(
+                f"check_env[{label}]",
+                "OMP_NUM_THREADS" in allowed and "GIT_SSH_COMMAND" in rejected,
+                f"allowed={allowed} rejected={rejected}",
+            )
+            continue
+        key = next(iter(env))
+        if expectation:
+            check(f"check_env[{label}]", key in allowed and key not in rejected, f"allowed={allowed} rejected={rejected}")
+        else:
+            check(f"check_env[{label}]", key in rejected and key not in allowed, f"allowed={allowed} rejected={rejected}")
+
+
 def main() -> None:
     run_jail_tests()
     run_classify_tests()
+    run_check_env_tests()
 
-    total = len(CLASSIFY_CASES) + 16  # 16 jail cases declared above
+    total = len(CLASSIFY_CASES) + 16 + len(CHECK_ENV_CASES)  # 16 jail cases declared above
     if FAILURES:
         print(f"FAILED {len(FAILURES)} of {total} checks:")
         for f in FAILURES:

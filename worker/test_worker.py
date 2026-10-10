@@ -23,7 +23,7 @@ JOB = {
     "job_id": "job_test_1",
     "attempt": 1,
     "type": "shell",
-    "payload": {"argv": ["echo", "hi"], "cwd": "proj1/code", "env": {}},
+    "payload": {"argv": ["cat", "greeting.txt"], "cwd": "proj1/code", "env": {}},  # "cat" is auto-allowed by policy.py
     "timeout_s": 60,
     "max_output_bytes": 100000,
 }
@@ -118,6 +118,8 @@ def main() -> None:
     tmp_dir = tempfile.mkdtemp()
     workspace_root = os.path.join(tmp_dir, "workspace")
     os.makedirs(os.path.join(workspace_root, "proj1", "code"), exist_ok=True)
+    with open(os.path.join(workspace_root, "proj1", "code", "greeting.txt"), "w") as f:
+        f.write("hi\n")
 
     config = {
         "backend_url": f"http://127.0.0.1:{port}",

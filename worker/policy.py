@@ -106,9 +106,17 @@ def _package_name(spec: str) -> str:
     return name.strip().lower()
 
 
-def _looks_like_pip_extra_index(args: list[str]) -> bool:
+def _looks_like_pip_extra_index(argv: list[str], payload: dict) -> bool:
+    """True if a custom package index is requested either via argv flags or
+    via a dedicated payload field (index_url / extra_index_url), covering job
+    shapes that don't encode pip's CLI flags literally in argv.
+    """
     flags = {"--index-url", "-i", "--extra-index-url", "--find-links", "-f"}
-    return any(a in flags for a in args)
+    if any(a in flags for a in argv):
+        return True
+    if payload.get("index_url") or payload.get("extra_index_url"):
+        return True
+    return False
 
 
 def _is_delete_argv(argv: list[str]) -> bool:
@@ -202,7 +210,7 @@ def _git_injects_config(argv: list[str]) -> bool:
     return False
 
 
-def _normalize_argv(job_type: str, payload: dict) -> list[str] | None:
+def normalize_argv(job_type: str, payload: dict) -> list[str] | None:
     """Return the argv-equivalent list for argv-bearing job types, or None if
     this job type has no argv (write_file, read_file, list_dir, download).
     If `payload["argv"]` is a single string, parse it with shlex (never
@@ -228,6 +236,43 @@ def _normalize_argv(job_type: str, payload: dict) -> list[str] | None:
     return None
 
 
+DENY_ENV_KEYS = {
+    "GIT_SSH_COMMAND",
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+    "PIP_INDEX_URL",
+    "PIP_EXTRA_INDEX_URL",
+}
+DENY_ENV_PREFIXES = ("GIT_CONFIG", "LD_", "DYLD_")
+DENY_ENV_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET")
+
+
+def check_env(env: dict) -> tuple[dict, list[str]]:
+    """Split a requested env dict into (allowed, rejected_keys). Rejects keys
+    that can redirect command execution, interpreter import paths, package
+    index resolution, or that look like a credential by naming convention.
+
+    Does not decide what the clean base environment is (PATH, HOME, TMPDIR,
+    LANG) -- that is runner.py's job; this only filters the extra keys a job
+    payload asks to add.
+    """
+    allowed = {}
+    rejected = []
+    for key, value in (env or {}).items():
+        upper = key.upper()
+        if upper in DENY_ENV_KEYS:
+            rejected.append(key)
+            continue
+        if any(upper.startswith(p) for p in DENY_ENV_PREFIXES):
+            rejected.append(key)
+            continue
+        if any(upper.endswith(s) for s in DENY_ENV_SUFFIXES):
+            rejected.append(key)
+            continue
+        allowed[key] = value
+    return allowed, rejected
+
+
 def classify(job: dict, *, allowed_packages=None, allowed_domains=None, max_download_bytes=None) -> tuple[str, str]:
     """Classify a job dict (shape: {"type": ..., "payload": {...}, "cwd": ...,
     optionally "approved": bool}) as ("auto"|"needs_approval"|"deny", reason).
@@ -243,7 +288,7 @@ def classify(job: dict, *, allowed_packages=None, allowed_domains=None, max_down
     payload = job.get("payload", {}) or {}
     approved = bool(job.get("approved", False))
 
-    argv = _normalize_argv(job_type, payload)
+    argv = normalize_argv(job_type, payload)
 
     # --- Deny checks (apply regardless of job type, and regardless of approval) ---
     if argv:
@@ -274,7 +319,8 @@ def classify(job: dict, *, allowed_packages=None, allowed_domains=None, max_down
     # --- needs_approval checks ---
     if job_type == "pip_install":
         packages = payload.get("packages", [])
-        if _looks_like_pip_extra_index(payload.get("argv", []) if isinstance(payload.get("argv"), list) else []):
+        pip_argv = payload.get("argv", []) if isinstance(payload.get("argv"), list) else []
+        if _looks_like_pip_extra_index(pip_argv, payload):
             if not approved:
                 return "needs_approval", "pip install with a custom index/find-links URL"
         unknown = [p for p in packages if _package_name(p) not in allowed_packages]
