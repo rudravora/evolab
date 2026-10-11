@@ -1,8 +1,7 @@
 "use client";
 
-// "Open workspace" on the landing page: with a session, go straight to the dashboard; otherwise
-// show the sign-in / sign-up card. The card is a Liquid Glass sheet (functional layer over the
-// film, regular variant, opaque fallback for Reduce Transparency and Increase Contrast).
+// "Open workspace" on the landing page: with a session, go straight to the workspace; otherwise
+// show the sign-in / sign-up card, a Liquid Glass sheet (GlassModal).
 //
 // Sign in is the real owner sign-in (POST /api/v1/auth/login, docs/API.md 2a, D-044).
 // Google, GitHub and Apple are shown but not connected: the backend has no OAuth yet, so they say
@@ -10,7 +9,8 @@
 
 import * as React from "react";
 import { AppleLogo, GithubLogo, GoogleLogo } from "@phosphor-icons/react";
-import { ArrowRight, Check, Copy, Eye, EyeOff, X } from "lucide-react";
+import { ArrowRight, Eye, EyeOff } from "lucide-react";
+import { CopyLine, GlassModal, OSSwitch, useOS } from "./GlassModal";
 
 const DASHBOARD = "/dashboard";
 
@@ -25,7 +25,7 @@ export function useOpenWorkspace() {
   return React.useContext(AccessContext);
 }
 
-/** A button styled with the prototype's classes that opens the workspace. */
+/** A button styled with the page's classes that opens the workspace. */
 export function OpenWorkspace({ className, children }: { className: string; children: React.ReactNode }) {
   const open = useOpenWorkspace();
   return (
@@ -75,35 +75,24 @@ export function WorkspaceAccessProvider({
   );
 }
 
-function CopyLine({ text }: { text: string }) {
-  const [done, setDone] = React.useState(false);
-  return (
-    <div className="glass-code">
-      <code className="mono">{text}</code>
-      <button
-        type="button"
-        aria-label={done ? "Copied" : "Copy command"}
-        onClick={async () => {
-          try {
-            await navigator.clipboard.writeText(text);
-            setDone(true);
-            window.setTimeout(() => setDone(false), 1600);
-          } catch {
-            /* clipboard blocked: the text is selectable */
-          }
-        }}
-      >
-        {done ? <Check size={15} /> : <Copy size={15} />}
-      </button>
-    </div>
-  );
-}
-
 const PROVIDERS = [
   { id: "google", label: "Google", Icon: GoogleLogo },
   { id: "github", label: "GitHub", Icon: GithubLogo },
   { id: "apple", label: "Apple", Icon: AppleLogo },
 ] as const;
+
+const SETUP = {
+  windows: {
+    hash: "cd backend; py scripts/hash_password.py",
+    restart: "py -m uvicorn app.main:app --port 8000",
+    shell: "PowerShell",
+  },
+  unix: {
+    hash: "cd backend && python3 scripts/hash_password.py",
+    restart: "python3 -m uvicorn app.main:app --port 8000",
+    shell: "Terminal",
+  },
+};
 
 function AccessCard({ target, onClose }: { target: string; onClose: () => void }) {
   const [mode, setMode] = React.useState<"signin" | "signup">("signin");
@@ -112,45 +101,7 @@ function AccessCard({ target, onClose }: { target: string; onClose: () => void }
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [provider, setProvider] = React.useState<string | null>(null);
-  const dialogRef = React.useRef<HTMLDivElement>(null);
-  const close = React.useRef(onClose);
-  close.current = onClose;
-
-  // Focus trap, Escape to close, focus returned to the opener.
-  React.useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled])'));
-    (dialog.querySelector<HTMLElement>("input") ?? focusable()[0])?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        close.current();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const items = focusable();
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (!first || !last) return;
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = overflow;
-      previous?.focus();
-    };
-  }, []);
+  const [os, setOs] = useOS();
 
   const switchMode = (m: "signin" | "signup") => {
     setMode(m);
@@ -189,119 +140,131 @@ function AccessCard({ target, onClose }: { target: string; onClose: () => void }
   };
 
   const signin = mode === "signin";
+  const cmd = SETUP[os];
 
   return (
-    <div
-      className="glass-backdrop"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div ref={dialogRef} className="glass-card" role="dialog" aria-modal="true" aria-labelledby="glass-title">
-        <button type="button" className="glass-close" onClick={onClose} aria-label="Close">
-          <X size={18} />
+    <GlassModal labelledBy="glass-title" onClose={onClose}>
+      <svg className="glass-mark" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+        <path
+          d="M10.25 11.5c1.7-3.1 4.15-4.65 7.45-4.65 4.42 0 7.05 3.08 7.05 6.8 0 4.05-2.18 6.17-6.95 6.17h-2.3c-3.06 0-5.42 1.77-5.42 4.8 0 2.7 2.02 4.53 4.92 4.53 4.22 0 7.2-2.86 8.91-8.6"
+          stroke="currentColor"
+          strokeWidth="1.55"
+          strokeLinecap="round"
+        />
+        <path d="M8.25 16.15h6.15M21.25 11.65h6.5" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" />
+        <circle cx="8.1" cy="16.15" r="2.05" fill="#8DB99E" />
+        <circle cx="28.12" cy="11.65" r="2.05" fill="#D7B579" />
+        <circle cx="15.02" cy="28.8" r="2.05" fill="#8DB99E" />
+        <circle cx="18.1" cy="18.15" r="1.6" fill="currentColor" />
+      </svg>
+      <h2 id="glass-title">{signin ? "Welcome back" : "Create your workspace"}</h2>
+      <p className="glass-sub">{signin ? "Sign in to approve plans and follow your runs." : "Set up the owner account for this EvoLab workspace."}</p>
+
+      <div className="glass-segment" role="tablist" aria-label="Sign in or sign up">
+        <span className="glass-segment-thumb" data-mode={mode} aria-hidden="true" />
+        <button type="button" role="tab" aria-selected={signin} onClick={() => switchMode("signin")}>
+          Sign in
         </button>
-
-        <svg className="glass-mark" viewBox="0 0 36 36" fill="none" aria-hidden="true">
-          <path
-            d="M10.25 11.5c1.7-3.1 4.15-4.65 7.45-4.65 4.42 0 7.05 3.08 7.05 6.8 0 4.05-2.18 6.17-6.95 6.17h-2.3c-3.06 0-5.42 1.77-5.42 4.8 0 2.7 2.02 4.53 4.92 4.53 4.22 0 7.2-2.86 8.91-8.6"
-            stroke="currentColor"
-            strokeWidth="1.55"
-            strokeLinecap="round"
-          />
-          <path d="M8.25 16.15h6.15M21.25 11.65h6.5" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" />
-          <circle cx="8.1" cy="16.15" r="2.05" fill="#8DB99E" />
-          <circle cx="28.12" cy="11.65" r="2.05" fill="#D7B579" />
-          <circle cx="15.02" cy="28.8" r="2.05" fill="#8DB99E" />
-          <circle cx="18.1" cy="18.15" r="1.6" fill="currentColor" />
-        </svg>
-        <h2 id="glass-title">{signin ? "Welcome back" : "Create your workspace"}</h2>
-        <p className="glass-sub">{signin ? "Sign in to approve plans and follow your runs." : "Set up the owner account for this EvoLab workspace."}</p>
-
-        <div className="glass-segment" role="tablist" aria-label="Sign in or sign up">
-          <span className="glass-segment-thumb" data-mode={mode} aria-hidden="true" />
-          <button type="button" role="tab" aria-selected={signin} onClick={() => switchMode("signin")}>
-            Sign in
-          </button>
-          <button type="button" role="tab" aria-selected={!signin} onClick={() => switchMode("signup")}>
-            Sign up
-          </button>
-        </div>
-
-        <div className="glass-providers">
-          {PROVIDERS.map(({ id, label, Icon }) => (
-            <button key={id} type="button" className="glass-provider" onClick={() => setProvider(label)} aria-describedby={provider === label ? "glass-provider-note" : undefined}>
-              <Icon size={18} weight="bold" aria-hidden="true" />
-              <span>
-                Continue with {label}
-              </span>
-            </button>
-          ))}
-        </div>
-        {provider && (
-          <p id="glass-provider-note" className="glass-note" role="status">
-            {provider} sign-in isn&apos;t connected to this workspace yet. Use the owner password{signin ? " below" : ""} for now.
-          </p>
-        )}
-
-        <div className="glass-divider">
-          <span>{signin ? "or use the owner password" : "or set the owner password"}</span>
-        </div>
-
-        {signin ? (
-          <form onSubmit={signIn} noValidate>
-            <label className="glass-field">
-              <span className="sr-only">Owner password</span>
-              <input
-                type={show ? "text" : "password"}
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Owner password"
-                aria-invalid={!!error}
-                aria-describedby={error ? "glass-error" : undefined}
-              />
-              <button type="button" className="glass-eye" onClick={() => setShow((v) => !v)} aria-label={show ? "Hide password" : "Show password"}>
-                {show ? <EyeOff size={17} /> : <Eye size={17} />}
-              </button>
-            </label>
-            {error && (
-              <p id="glass-error" className="glass-error" role="alert">
-                {error}
-              </p>
-            )}
-            <button type="submit" className="glass-primary" disabled={busy}>
-              {busy ? "Signing in" : "Sign in"} <ArrowRight size={16} />
-            </button>
-            <p className="glass-foot">
-              New here?{" "}
-              <button type="button" onClick={() => switchMode("signup")}>
-                Create the owner account
-              </button>
-            </p>
-          </form>
-        ) : (
-          <div>
-            <ol className="glass-steps">
-              <li>
-                <b>Choose a password</b> on the machine that runs the backend. The script asks for it and prints a hash, never the password.
-                <CopyLine text="cd backend; py scripts/hash_password.py" />
-              </li>
-              <li>
-                <b>Save the hash.</b> Paste the printed <span className="mono">OWNER_PASSWORD_HASH=…</span> line into <span className="mono">.env</span> at the repo root.
-              </li>
-              <li>
-                <b>Restart the backend</b> so it reads the new hash.
-                <CopyLine text="py -m uvicorn app.main:app --port 8000" />
-              </li>
-            </ol>
-            <button type="button" className="glass-primary" onClick={() => switchMode("signin")}>
-              I&apos;ve set it, sign in <ArrowRight size={16} />
-            </button>
-            <p className="glass-foot">Forgot the password? Repeat these steps to set a new one.</p>
-          </div>
-        )}
+        <button type="button" role="tab" aria-selected={!signin} onClick={() => switchMode("signup")}>
+          Sign up
+        </button>
       </div>
-    </div>
+
+      <div className="glass-providers">
+        {PROVIDERS.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            className="glass-provider"
+            onClick={() => setProvider(label)}
+            aria-describedby={provider === label ? "glass-provider-note" : undefined}
+          >
+            <Icon size={18} weight="bold" aria-hidden="true" />
+            <span>Continue with {label}</span>
+          </button>
+        ))}
+      </div>
+      {provider && (
+        <p id="glass-provider-note" className="glass-note" role="status">
+          {provider} sign-in isn&apos;t connected to this workspace yet. Use the owner password{signin ? " below" : ""} for now.
+        </p>
+      )}
+
+      <div className="glass-divider">
+        <span>{signin ? "or use the owner password" : "or set the owner password"}</span>
+      </div>
+
+      {signin ? (
+        <form onSubmit={signIn} noValidate>
+          <label className="glass-field">
+            <span className="sr-only">Owner password</span>
+            <input
+              type={show ? "text" : "password"}
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Owner password"
+              aria-invalid={!!error}
+              aria-describedby={error ? "glass-error" : undefined}
+            />
+            <button type="button" className="glass-eye" onClick={() => setShow((v) => !v)} aria-label={show ? "Hide password" : "Show password"}>
+              {show ? <EyeOff size={17} /> : <Eye size={17} />}
+            </button>
+          </label>
+          {error && (
+            <p id="glass-error" className="glass-error" role="alert">
+              {error}
+            </p>
+          )}
+          <button type="submit" className="glass-primary" disabled={busy}>
+            {busy ? "Signing in" : "Sign in"} <ArrowRight size={16} />
+          </button>
+          <p className="glass-foot">
+            New here?{" "}
+            <button type="button" onClick={() => switchMode("signup")}>
+              Create the owner account
+            </button>
+          </p>
+        </form>
+      ) : (
+        <div>
+          <OSSwitch os={os} onChange={setOs} />
+          <ol className="glass-steps">
+            <li>
+              <span className="glass-step-no" aria-hidden="true">
+                1
+              </span>
+              <div>
+                <b>Choose a password.</b> On the machine that runs the backend, open {cmd.shell} at the repo root and run this. It asks for the password and prints a hash,
+                never the password.
+                <CopyLine text={cmd.hash} />
+              </div>
+            </li>
+            <li>
+              <span className="glass-step-no" aria-hidden="true">
+                2
+              </span>
+              <div>
+                <b>Save the hash.</b> Paste the printed <span className="mono">OWNER_PASSWORD_HASH=…</span> line into the <span className="mono">.env</span> file at the
+                repo root, replacing the old line if there is one.
+              </div>
+            </li>
+            <li>
+              <span className="glass-step-no" aria-hidden="true">
+                3
+              </span>
+              <div>
+                <b>Restart the backend</b> from the <span className="mono">backend</span> folder so it reads the new hash.
+                <CopyLine text={cmd.restart} />
+              </div>
+            </li>
+          </ol>
+          <button type="button" className="glass-primary" onClick={() => switchMode("signin")}>
+            I&apos;ve set it, sign in <ArrowRight size={16} />
+          </button>
+          <p className="glass-foot">Forgot the password? Repeat these steps to set a new one.</p>
+        </div>
+      )}
+    </GlassModal>
   );
 }

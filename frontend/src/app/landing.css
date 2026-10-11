@@ -1563,3 +1563,31 @@
 @media (max-width: 760px) {
   .evo-landing .timeline-fork-bar, .evo-landing .timeline-merge-bar, .evo-landing .timeline-lane::before, .evo-landing .timeline-lane::after {display: none;}
 }
+
+/* Glass card: steps with explicit numbers, wrapping commands, OS switch, About and Contact. */
+.evo-landing .glass-steps li::before {content: none;}
+.evo-landing .glass-steps li {display: flex; gap: 10px; padding-left: 0;}
+.evo-landing .glass-steps li > div {flex: 1; min-width: 0;}
+.evo-landing .glass-step-no {flex: none; display: grid; place-items: center; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%; background: rgba(141, 185, 158, .18); color: #b7dcc4; font: 600 12px "DM Sans", sans-serif;}
+.evo-landing .glass-code code {white-space: pre-wrap; word-break: normal; overflow-wrap: anywhere; overflow: visible; line-height: 1.5; padding: 4px 0;}
+.evo-landing .glass-code {align-items: flex-start;}
+.evo-landing .glass-os {display: inline-flex; gap: 2px; padding: 3px; margin: 0 0 14px; border-radius: 999px; background: rgba(0, 0, 0, .28); border: 1px solid rgba(255, 255, 255, .07);}
+.evo-landing .glass-os button {height: 30px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: #b9c4bd; font: 600 12px "DM Sans", sans-serif; cursor: pointer;}
+.evo-landing .glass-os button.is-on {background: rgba(255, 255, 255, .14); color: #fff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16);}
+.evo-landing .glass-card-wide {width: min(560px, 100%);}
+.evo-landing .glass-sub-wide {max-width: 440px;}
+.evo-landing .glass-facts, .evo-landing .glass-links {margin: 4px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; text-align: left;}
+.evo-landing .glass-facts li {display: flex; gap: 12px; padding: 12px 14px; border-radius: 14px; background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .08);}
+.evo-landing .glass-facts b, .evo-landing .glass-links b {display: block; color: #fff; font-size: 14px; font-weight: 600;}
+.evo-landing .glass-facts p {margin: 3px 0 0; color: #b9c4bd; font-size: 13px; line-height: 1.55;}
+.evo-landing .glass-fact-icon {flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: rgba(141, 185, 158, .14); color: #b7dcc4;}
+.evo-landing .glass-links a {display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .08); color: inherit; transition: background .18s ease, border-color .18s ease;}
+.evo-landing .glass-links a:hover {background: rgba(255, 255, 255, .1); border-color: rgba(255, 255, 255, .16);}
+.evo-landing .glass-link-copy {flex: 1; min-width: 0;}
+.evo-landing .glass-link-copy span {display: block; margin-top: 2px; color: #b9c4bd; font-size: 13px;}
+.evo-landing .glass-link-arrow {flex: none; color: #b9c4bd;}
+.evo-landing .glass-actions {display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px;}
+.evo-landing .glass-secondary {flex: 1; min-width: 160px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 48px; border-radius: 14px; border: 1px solid rgba(255, 255, 255, .14); background: rgba(255, 255, 255, .06); color: #eef3ef; font: 600 14px "DM Sans", sans-serif; transition: background .18s ease;}
+.evo-landing .glass-secondary:hover {background: rgba(255, 255, 255, .11);}
+.evo-landing .glass-primary.glass-primary-inline {flex: 1; min-width: 160px; width: auto; margin-top: 0;}
+.evo-landing .site-footer-col button {font: 13px "DM Sans", sans-serif;}

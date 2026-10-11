@@ -203,10 +203,21 @@ function LaptopCard({ workers }: { workers?: Worker[] }) {
       setPairErr(e instanceof ApiError ? e.message : "Couldn't create a pairing code. Try again.");
     }
   };
-  const backend = pairing?.command.match(/BACKEND_URL=(\S+)/)?.[1] ?? "http://localhost:8000";
-  const ps = pairing
-    ? `$env:BACKEND_URL = "${backend}"; $env:PAIRING_CODE = "${pairing.pairing_code}"; $env:WORKSPACE_ROOT = "$PWD\\workspace"; py worker\\worker.py`
-    : "";
+  const [os, setOs] = React.useState<"windows" | "unix">("windows");
+  const [origin, setOrigin] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!/Win/i.test(navigator.userAgent)) setOs("unix");
+    // Opened through a public link (for example a tunnel): the worker can reach the backend through
+    // this site, because /api/v1 is proxied. On localhost, use the backend's own address.
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)) setOrigin(window.location.origin);
+  }, []);
+  const backend = origin ?? pairing?.command.match(/BACKEND_URL=(\S+)/)?.[1] ?? "http://localhost:8000";
+  const ps = !pairing
+    ? ""
+    : os === "windows"
+      ? `$env:BACKEND_URL = "${backend}"; $env:PAIRING_CODE = "${pairing.pairing_code}"; $env:WORKSPACE_ROOT = "$PWD\\workspace"; py worker\\worker.py`
+      : `BACKEND_URL="${backend}" PAIRING_CODE="${pairing.pairing_code}" WORKSPACE_ROOT="$PWD/workspace" python3 worker/worker.py`;
+  const install = os === "windows" ? "py -m pip install -r worker\\requirements.txt" : "python3 -m pip install -r worker/requirements.txt";
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(ps);
@@ -302,7 +313,21 @@ function LaptopCard({ workers }: { workers?: Worker[] }) {
             <span className="text-v2-text3 ml-2">valid 10 min</span>
           </li>
           <li>
-            <span className="font-semibold text-v2-text">In PowerShell, from the EvoLab folder (the repo root):</span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-semibold text-v2-text">In {os === "windows" ? "PowerShell" : "Terminal"}, from the EvoLab folder (the repo root):</span>
+              <Segmented
+                label="Laptop operating system"
+                value={os}
+                onChange={setOs}
+                options={[
+                  { value: "windows", label: "Windows" },
+                  { value: "unix", label: "macOS / Linux" },
+                ]}
+              />
+            </div>
+            <p className="mt-1.5 text-v2-text3">
+              First time only, install the worker&apos;s packages: <span className="v2-mono text-v2-text2 break-all">{install}</span>
+            </p>
             <div className="relative mt-1.5">
               <pre className="v2-mono text-[12px] leading-relaxed bg-v2-raised rounded-[7px] p-3 pr-11 whitespace-pre-wrap break-all text-v2-text">{ps}</pre>
               <button
