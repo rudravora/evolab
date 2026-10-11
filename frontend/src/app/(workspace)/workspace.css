@@ -1,0 +1,181 @@
+/* The EvoLab workspace design system (Swiss scientific editorial: mineral paper, ink,
+   signature teal, gold for decisions, muted red for errors), scoped to the .v2 wrapper so v1 is untouched.
+   Values are RGB triplets so Tailwind opacity modifiers work (bg-v2-accent/10).
+   Text colours are checked for WCAG AA against paper and surface in both appearances. */
+
+@import url("https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Instrument+Serif:ital@0;1&display=swap");
+
+.v2 {
+  --v2-bg: 246 246 241;          /* paper #F6F6F1 */
+  --v2-surface: 255 255 255;
+  --v2-raised: 240 241 236;      /* inset fills */
+  --v2-fill: 250 251 248;        /* sidebar */
+  --v2-line: 24 36 33;           /* ink, used with low alpha for hairlines */
+  --v2-text: 24 36 33;           /* ink #182421 */
+  --v2-text2: 86 98 93;          /* #56625D, 6.0:1 on paper */
+  --v2-text3: 102 112 106;       /* #66706A, 4.9:1 on paper */
+  --v2-accent: 20 122 105;       /* teal #147A69, 4.9:1 on paper */
+  --v2-on-accent: 255 255 255;
+  --v2-green: 46 114 90;         /* reproduced / done #2E725A */
+  --v2-orange: 139 102 50;       /* decision gold, text-safe #8B6632 */
+  --v2-gold: 183 121 55;         /* decorative gold #B77937 (marks, never small text) */
+  --v2-red: 160 78 68;           /* #A04E44 */
+  --v2-purple: 87 110 142;       /* evolution and lineage slate #576E8E */
+  --v2-teal: 20 122 105;
+  --v2-ink-card: 25 41 35;       /* the dark "current run" card */
+  --v2-ink-card-text: 248 248 243;
+  --v2-ink-card-muted: 190 204 194;
+  --v2-shadow: 0 1px 0 rgb(24 36 33 / 0.03);
+  --v2-shadow-lg: 0 30px 80px rgb(7 20 14 / 0.28);
+  color-scheme: light;
+}
+
+/* Appearance follows the system setting, decided by CSS so the first paint is right. */
+@media (prefers-color-scheme: dark) {
+  .v2 {
+    --v2-bg: 18 22 21;           /* #121615 */
+    --v2-surface: 28 34 32;      /* #1C2220 */
+    --v2-raised: 37 44 41;       /* #252C29 */
+    --v2-fill: 22 27 25;
+    --v2-line: 230 235 232;
+    --v2-text: 230 235 232;      /* #E6EBE8 */
+    --v2-text2: 196 205 199;
+    --v2-text3: 168 178 172;     /* #A8B2AC, 7.4:1 on surface */
+    --v2-accent: 141 185 158;    /* sage #8DB99E */
+    --v2-on-accent: 18 22 21;
+    --v2-green: 158 191 171;
+    --v2-orange: 215 181 121;    /* #D7B579 */
+    --v2-gold: 215 181 121;
+    --v2-red: 217 146 136;       /* #D99288 */
+    --v2-purple: 158 181 201;
+    --v2-teal: 141 185 158;
+    --v2-ink-card: 33 41 37;
+    --v2-ink-card-text: 230 235 232;
+    --v2-ink-card-muted: 168 178 172;
+    --v2-shadow: 0 0 0 1px rgb(230 235 232 / 0.02);
+    --v2-shadow-lg: 0 30px 80px rgb(0 0 0 / 0.55);
+    color-scheme: dark;
+  }
+}
+
+.v2 {
+  background: rgb(var(--v2-bg));
+  color: rgb(var(--v2-text));
+  font-family: "DM Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-optical-sizing: auto;
+}
+
+.v2 h1,
+.v2 h2,
+.v2 h3 {
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.v2 .tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+.v2 .v2-mono {
+  font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0;
+}
+
+/* Editorial accent: one italic serif word in a page title, the run question. Never body text. */
+.v2 .v2-serif {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+.v2 :focus-visible {
+  outline: 3px solid rgb(var(--v2-accent) / 0.4);
+  outline-offset: 2px;
+  border-radius: 7px;
+}
+
+.v2 ::selection {
+  background: rgb(var(--v2-accent) / 0.22);
+}
+
+.v2 .v2-material {
+  background: rgb(var(--v2-fill) / 0.86);
+  backdrop-filter: saturate(160%) blur(16px);
+  -webkit-backdrop-filter: saturate(160%) blur(16px);
+}
+
+/* Cards: hairline and paper-white surface, no heavy shadow. */
+.v2 .v2-card {
+  background: rgb(var(--v2-surface));
+  border: 1px solid rgb(var(--v2-line) / 0.09);
+  box-shadow: var(--v2-shadow);
+  border-radius: 10px;
+}
+
+.v2 .v2-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--v2-line) / 0.18) transparent;
+}
+
+@keyframes v2-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgb(var(--v2-accent) / 0.16); }
+  50% { box-shadow: 0 0 0 5px rgb(var(--v2-accent) / 0.06); }
+}
+.v2 .v2-pulse {
+  animation: v2-pulse 2.6s ease-in-out infinite;
+}
+
+@keyframes v2-shimmer {
+  from { background-position: -200px 0; }
+  to { background-position: 200px 0; }
+}
+.v2 .v2-skeleton {
+  background: linear-gradient(90deg, rgb(var(--v2-line) / 0.04), rgb(var(--v2-line) / 0.08), rgb(var(--v2-line) / 0.04));
+  background-size: 400px 100%;
+  animation: v2-shimmer 1.4s linear infinite;
+  border-radius: 7px;
+}
+
+@keyframes v2-sheet-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes v2-pop-in {
+  from { transform: translateY(8px) scale(0.985); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes v2-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.v2 .v2-sheet { animation: v2-sheet-in 260ms cubic-bezier(0.32, 0.72, 0, 1); }
+.v2 .v2-pop { animation: v2-pop-in 220ms cubic-bezier(0.32, 0.72, 0, 1); }
+.v2 .v2-fade { animation: v2-fade-in 200ms ease-out; }
+
+/* Report and other Markdown. */
+.v2 .v2-prose {
+  font-size: 15px;
+  line-height: 1.7;
+  color: rgb(var(--v2-text2));
+  max-width: 72ch;
+}
+.v2 .v2-prose > * + * { margin-top: 0.8em; }
+.v2 .v2-prose h1 { font-size: 26px; font-weight: 500; color: rgb(var(--v2-text)); letter-spacing: -0.045em; }
+.v2 .v2-prose h2 { font-size: 19px; font-weight: 600; color: rgb(var(--v2-text)); margin-top: 1.7em; }
+.v2 .v2-prose h3 { font-size: 16px; font-weight: 600; color: rgb(var(--v2-text)); margin-top: 1.3em; }
+.v2 .v2-prose strong { color: rgb(var(--v2-text)); font-weight: 600; }
+.v2 .v2-prose ul { list-style: disc; padding-left: 1.25em; }
+.v2 .v2-prose ol { list-style: decimal; padding-left: 1.25em; }
+.v2 .v2-prose a { color: rgb(var(--v2-accent)); text-decoration: underline; text-underline-offset: 2px; }
+.v2 .v2-prose code { font-family: "DM Mono", ui-monospace, monospace; font-size: 0.88em; background: rgb(var(--v2-raised)); padding: 0.1em 0.35em; border-radius: 4px; }
+.v2 .v2-prose pre { background: rgb(var(--v2-raised)); padding: 12px; border-radius: 7px; overflow-x: auto; }
+.v2 .v2-prose pre code { background: none; padding: 0; }
+.v2 .v2-prose table { width: 100%; font-size: 13px; border-collapse: collapse; display: block; overflow-x: auto; }
+.v2 .v2-prose th { text-align: left; font-weight: 600; color: rgb(var(--v2-text)); }
+.v2 .v2-prose th, .v2 .v2-prose td { padding: 7px 10px; border-bottom: 1px solid rgb(var(--v2-line) / 0.09); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: reduce) {
+  .v2 .v2-pulse, .v2 .v2-skeleton, .v2 .v2-sheet, .v2 .v2-pop, .v2 .v2-fade { animation: none; }
+  .v2 * { transition-duration: 0.01ms !important; }
+}

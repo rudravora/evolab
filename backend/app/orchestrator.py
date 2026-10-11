@@ -539,7 +539,31 @@ def _dispatch(services, fn, task_id: str, inline: bool) -> None:
     pool.submit(fn, services, task_id)
 
 
+def recover_orphans(services) -> int:
+    """Requeue agent tasks left `running` by a process that died (killed server, crash, restart).
+
+    Only one orchestrator runs (D-046), so at startup nothing can still be executing them. The agent
+    loop commits its transcript before every AI and tool call, so a requeued task resumes from its
+    last saved step instead of starting over. Without this, such a task blocks its run forever,
+    because the scheduler only starts `queued` tasks."""
+    with services.sessionmaker() as db:
+        ids = list(db.scalars(select(AgentTask.id).where(AgentTask.status == "running", AgentTask.agent_id.is_not(None))))
+        if ids:
+            db.execute(update(AgentTask).where(AgentTask.id.in_(ids)).values(status="queued"))
+            for t in db.scalars(select(AgentTask).where(AgentTask.id.in_(ids))):
+                t.state_json = {**(t.state_json or {}), "retry_at": None}
+                emit(db, t.run_id, "orchestrator", "agent.task", {"task_id": t.id, "agent_id": t.agent_id, "status": "queued",
+                                                                   "summary": "resumed after a server restart"})
+            db.commit()
+            log.warning("requeued %d agent task(s) left running by a previous process", len(ids))
+        return len(ids)
+
+
 async def run_forever(services, interval_s: float = 1.0) -> None:
+    try:
+        await asyncio.to_thread(recover_orphans, services)
+    except Exception:  # noqa: BLE001 - never block scheduling on recovery
+        log.exception("orphan recovery failed")
     while True:
         try:
             await asyncio.to_thread(tick, services)

@@ -401,3 +401,27 @@ def test_failed_readme_fetch_is_not_reported_as_unlinked(agent_app):
         db.commit()
         facts = {f["fact"] for f in build_brief(db, db.get(Run, "run_x"))["facts"]}
     assert "repo_fetch_failed" in facts and "repo_not_linked_to_paper" not in facts
+
+
+def test_orphaned_running_task_is_requeued_on_startup(ac, driver):
+    """A server killed mid-task leaves the task `running`; the next process must requeue it, or the run hangs."""
+    from sqlalchemy import select
+    from app import orchestrator
+    from app.models import AgentTask, Event
+
+    run_id = start(ac)["run_id"]
+    driver.step()
+    driver.step()                                         # the Meta-Controller's plan task exists now
+    with driver.services().sessionmaker() as db:
+        t = db.scalars(select(AgentTask).where(AgentTask.run_id == run_id, AgentTask.agent_id.is_not(None))).first()
+        t.status, t.state_json = "running", {"messages": [{"role": "system", "content": "x"}], "retry_at": 9e18}
+        db.commit()
+        tid = t.id
+    assert orchestrator.recover_orphans(driver.services()) == 1
+    with driver.services().sessionmaker() as db:
+        t = db.get(AgentTask, tid)
+        assert t.status == "queued" and t.state_json["retry_at"] is None
+        assert t.state_json["messages"]                   # the transcript is kept, so it resumes, not restarts
+        assert db.scalar(select(Event).where(Event.run_id == run_id, Event.type == "agent.task")
+                         .order_by(Event.id.desc())).payload_json["summary"] == "resumed after a server restart"
+    assert orchestrator.recover_orphans(driver.services()) == 0
